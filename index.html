@@ -1,0 +1,954 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover"/>
+<meta name="mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="default"/>
+<meta name="apple-mobile-web-app-title" content="ColorQuest"/>
+<meta name="theme-color" content="#f5f0e8"/>
+<title>ColorQuest</title>
+<link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%23f5f0e8'/%3E%3Ctext y='.9em' font-size='72' x='12'%3E%F0%9F%8E%A8%3C/text%3E%3C/svg%3E"/>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;background:#f5f0e8;overscroll-behavior:none}
+body{-webkit-tap-highlight-color:transparent;font-family:'Courier New','Lucida Console',monospace}
+#root{min-height:100dvh}
+*{scrollbar-width:none}*::-webkit-scrollbar{display:none}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+const mb=new Blob([JSON.stringify({name:"ColorQuest",short_name:"ColorQuest",description:"ColorQuest — paint tracker",start_url:".",display:"standalone",background_color:"#f5f0e8",theme_color:"#f5f0e8",orientation:"portrait-primary",icons:[{src:"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%23f5f0e8'/%3E%3Ctext y='.9em' font-size='72' x='12'%3E%F0%9F%8E%A8%3C/text%3E%3C/svg%3E",sizes:"512x512",type:"image/svg+xml",purpose:"any maskable"}]})],{type:"application/json"});
+const ml=document.createElement("link");ml.rel="manifest";ml.href=URL.createObjectURL(mb);document.head.appendChild(ml);
+if("serviceWorker"in navigator){const sw=`self.addEventListener("install",e=>{self.skipWaiting()});self.addEventListener("activate",e=>{e.waitUntil(clients.claim())});self.addEventListener("fetch",e=>{e.respondWith(caches.match(e.request).then(c=>c||fetch(e.request)))})`;navigator.serviceWorker.register(URL.createObjectURL(new Blob([sw],{type:"application/javascript"}))).catch(()=>{})}
+</script>
+<script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script type="text/babel">
+const {useState,useEffect,useMemo,useRef,useCallback}=React;
+
+// Supabase
+const SUPABASE_URL="https://ipyrazhrdvjlmlfyltui.supabase.co";
+const SUPABASE_KEY="sb_publishable_w_aJ_CftNWl86Yq9BdhGzA_fL2reu97";
+const supabase=window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
+
+const T={
+  bg0:"#f5f0e8",bg1:"#ede8df",bg2:"#e4ddd2",
+  border:"#cec8bc",border2:"#bdb7ab",
+  text:"#2c2416",text2:"#6b5f4e",text3:"#9c9080",
+  accent:"#7c4dcc",accentDim:"rgba(124,77,204,0.15)",
+  green:"#2d8a4e",blue:"#1a6faa",yellow:"#b07d1a",orange:"#c45c1a",red:"#c0392b",
+};
+
+// ── Storage ───────────────────────────────────────────────────────────────────
+const SK_DATA="cq-data-v4",SK_PAINTS="cq-paints-v1",SK_LOG="cq-log-v1",SK_BACKUP="cq-lastbackup-v1";
+const lsLoad=(k,d)=>{try{const r=localStorage.getItem(k);return r?JSON.parse(r):d}catch{return d}};
+const lsSave=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch{}};
+
+const DEFAULT_DATA={projects:[
+  {id:1,name:"Orks Waaagh!",faction:"Orks",units:[
+    {id:1,name:"Boyz Squad",models:20,status:"painted",notes:"Green skin, red eyes.",photo:null,subgroups:null},
+    {id:2,name:"Nobz",models:5,status:"built",notes:"",photo:null,subgroups:null},
+    {id:3,name:"Warboss",models:1,status:"unpainted",notes:"Check GW NMM tutorial.",photo:null,subgroups:null},
+    {id:4,name:"Trukk",models:1,status:"new_in_box",notes:"",photo:null,subgroups:null},
+  ],recipes:[
+    {id:101,name:"Skin",steps:[
+      {phase:"Base",paint:"Waaagh! Flesh",brand:"Citadel",type:"Base",notes:""},
+      {phase:"Shade",paint:"Biel-Tan Green",brand:"Citadel",type:"Shade",notes:""},
+      {phase:"Layer",paint:"Warboss Green",brand:"Citadel",type:"Layer",notes:""},
+      {phase:"Highlight",paint:"Skarsnik Green",brand:"Citadel",type:"Layer",notes:"Edge highlight only"},
+    ]},
+    {id:102,name:"Armour",steps:[
+      {phase:"Base",paint:"Leadbelcher",brand:"Citadel",type:"Base",notes:""},
+      {phase:"Shade",paint:"Nuln Oil",brand:"Citadel",type:"Shade",notes:""},
+      {phase:"Drybrush",paint:"Ironbreaker",brand:"Citadel",type:"Dry",notes:""},
+    ]},
+  ]},
+  {id:2,name:"Space Marine Strike Force",faction:"Space Marines",units:[
+    {id:5,name:"Tactical Squad",models:10,status:"painted",notes:"Ultramarines blue.",photo:null,subgroups:null},
+    {id:6,name:"Terminators",models:5,status:"built",notes:"",photo:null,subgroups:null},
+    {id:7,name:"Land Raider",models:1,status:"new_in_box",notes:"",photo:null,subgroups:null},
+  ],recipes:[
+    {id:201,name:"Armour",steps:[
+      {phase:"Base",paint:"Macragge Blue",brand:"Citadel",type:"Base",notes:""},
+      {phase:"Shade",paint:"Nuln Oil",brand:"Citadel",type:"Shade",notes:""},
+      {phase:"Layer",paint:"Calgar Blue",brand:"Citadel",type:"Layer",notes:""},
+      {phase:"Highlight",paint:"Fenrisian Grey",brand:"Citadel",type:"Layer",notes:"Edge only"},
+    ]},
+  ]},
+]};
+
+const DEFAULT_PAINTS=[
+  {id:"p1",brand:"Citadel",type:"Base",name:"Macragge Blue",owned:true},
+  {id:"p2",brand:"Citadel",type:"Base",name:"Waaagh! Flesh",owned:true},
+  {id:"p3",brand:"Citadel",type:"Base",name:"Leadbelcher",owned:true},
+  {id:"p4",brand:"Citadel",type:"Base",name:"Abaddon Black",owned:true},
+  {id:"p5",brand:"Citadel",type:"Base",name:"Wraithbone",owned:true},
+  {id:"p6",brand:"Citadel",type:"Shade",name:"Nuln Oil",owned:true},
+  {id:"p7",brand:"Citadel",type:"Shade",name:"Agrax Earthshade",owned:true},
+  {id:"p8",brand:"Citadel",type:"Shade",name:"Biel-Tan Green",owned:true},
+  {id:"p9",brand:"Citadel",type:"Shade",name:"Reikland Fleshshade",owned:true},
+  {id:"p10",brand:"Citadel",type:"Layer",name:"Calgar Blue",owned:true},
+  {id:"p11",brand:"Citadel",type:"Layer",name:"Warboss Green",owned:true},
+  {id:"p12",brand:"Citadel",type:"Layer",name:"Skarsnik Green",owned:true},
+  {id:"p13",brand:"Citadel",type:"Layer",name:"Fenrisian Grey",owned:true},
+  {id:"p14",brand:"Citadel",type:"Dry",name:"Ironbreaker",owned:true},
+  {id:"p15",brand:"Citadel",type:"Contrast",name:"Blood Angels Red",owned:false},
+  {id:"p16",brand:"Citadel",type:"Contrast",name:"Basilicanum Grey",owned:false},
+  {id:"p17",brand:"Vallejo",type:"Model Color",name:"Flat Black",owned:true},
+  {id:"p18",brand:"Vallejo",type:"Model Color",name:"Ivory",owned:false},
+  {id:"p19",brand:"Vallejo",type:"Game Color",name:"Goblin Green",owned:false},
+  {id:"p20",brand:"Army Painter",type:"Primer",name:"Matt Black",owned:true},
+  {id:"p21",brand:"Army Painter",type:"Warpaints",name:"Toxic Mist",owned:false},
+];
+
+// ── Share helpers ─────────────────────────────────────────────────────────────
+function encodeShare(projects){try{const s=projects.map(p=>({...p,units:p.units.map(u=>({...u,photo:null}))}));return btoa(unescape(encodeURIComponent(JSON.stringify({_mrp:1,projects:s}))))}catch{return null}}
+function decodeShare(hash){try{const b64=hash.replace(/^#share=/,"");const p=JSON.parse(decodeURIComponent(escape(atob(b64))));return p._mrp&&p.projects?p.projects:null}catch{return null}}
+function buildShareUrl(projects){const e=encodeShare(projects);return e?window.location.href.split("#")[0]+"#share="+e:null}
+
+// ── CLOUD SYNC ────────────────────────────────────────────────────────────────
+// Loads/saves the whole user payload (projects, paints, log) as one JSON row.
+async function cloudLoad(){
+  const {data:{user}}=await supabase.auth.getUser();
+  if(!user)return null;
+  const {data,error}=await supabase.from("colorquest_data").select("*").eq("user_id",user.id).maybeSingle();
+  if(error){console.error("cloudLoad error",error);return null}
+  return data; // {projects, paints, log, updated_at} or null if no row yet
+}
+async function cloudSave(payload){
+  const {data:{user}}=await supabase.auth.getUser();
+  if(!user)return false;
+  const {error}=await supabase.from("colorquest_data").upsert({user_id:user.id,...payload,updated_at:new Date().toISOString()});
+  if(error){console.error("cloudSave error",error);return false}
+  return true;
+}
+
+// ── AUTH HOOK ─────────────────────────────────────────────────────────────────
+function useAuth(){
+  const [session,setSession]=useState(undefined); // undefined=loading, null=signed out, object=signed in
+  useEffect(()=>{
+    supabase.auth.getSession().then(({data})=>setSession(data.session||null));
+    const {data:sub}=supabase.auth.onAuthStateChange((_event,sess)=>setSession(sess));
+    return ()=>sub.subscription.unsubscribe();
+  },[]);
+  return session;
+}
+
+// ── LOGIN SCREEN ──────────────────────────────────────────────────────────────
+function LoginScreen({onSkip}){
+  const [email,setEmail]=useState("");
+  const [code,setCode]=useState("");
+  const [sent,setSent]=useState(false);
+  const [error,setError]=useState("");
+  const [loading,setLoading]=useState(false);
+
+  async function sendCode(){
+    if(!email.trim())return;
+    setLoading(true);setError("");
+    // shouldCreateUser ensures new emails work too; no emailRedirectTo = OTP code email, not a clickable link
+    const {error}=await supabase.auth.signInWithOtp({
+      email:email.trim(),
+      options:{shouldCreateUser:true}
+    });
+    setLoading(false);
+    if(error){setError(error.message)}else{setSent(true)}
+  }
+
+  async function verifyCode(){
+    if(!code.trim())return;
+    setLoading(true);setError("");
+    const {error}=await supabase.auth.verifyOtp({
+      email:email.trim(),
+      token:code.trim(),
+      type:"email"
+    });
+    setLoading(false);
+    if(error){setError(error.message)}
+    // on success, onAuthStateChange in useAuth will pick up the new session automatically
+  }
+
+  return(<div style={{minHeight:"100dvh",background:T.bg0,color:T.text,fontFamily:"'Courier New','Lucida Console',monospace",display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+    <div style={{maxWidth:380,width:"100%"}}>
+      <div style={{textAlign:"center",marginBottom:28}}>
+        <div style={{fontSize:40,marginBottom:8}}>🎨</div>
+        <h1 style={{fontSize:22,fontWeight:900,color:T.accent,letterSpacing:"0.07em",margin:0}}>COLORQUEST</h1>
+        <div style={{fontSize:12,color:T.text3,marginTop:6}}>Sign in to sync your projects across devices</div>
+      </div>
+
+      {!sent?<>
+        <Inp label="Email address" type="email" placeholder="you@example.com" value={email} onChange={e=>setEmail(e.target.value)} onKeyDown={e=>e.key==="Enter"&&sendCode()} autoFocus/>
+        {error&&<div style={{background:T.red+"14",border:`1px solid ${T.red}30`,borderRadius:8,padding:"10px 12px",marginBottom:13,fontSize:12,color:T.red}}>{error}</div>}
+        <Btn onClick={sendCode} sx={{width:"100%",marginBottom:10}} disabled={loading}>{loading?"Sending…":"Send Code"}</Btn>
+        <div style={{textAlign:"center"}}>
+          <button onClick={onSkip} style={{background:"none",border:"none",color:T.text3,cursor:"pointer",fontSize:12,fontFamily:"inherit",textDecoration:"underline"}}>Skip — use this device only</button>
+        </div>
+      </>:<>
+        <div style={{textAlign:"center",marginBottom:16}}>
+          <div style={{fontSize:32,marginBottom:10}}>📬</div>
+          <div style={{fontSize:14,fontWeight:700,color:T.text,marginBottom:6}}>Check your email</div>
+          <div style={{fontSize:13,color:T.text2,lineHeight:1.6}}>We sent a 6-digit code to<br/><strong style={{color:T.text}}>{email}</strong></div>
+        </div>
+        <Inp label="Enter code" placeholder="123456" value={code} onChange={e=>setCode(e.target.value)} onKeyDown={e=>e.key==="Enter"&&verifyCode()} inputMode="numeric" autoFocus style={{textAlign:"center",fontSize:20,letterSpacing:"0.3em"}}/>
+        {error&&<div style={{background:T.red+"14",border:`1px solid ${T.red}30`,borderRadius:8,padding:"10px 12px",marginBottom:13,fontSize:12,color:T.red}}>{error}</div>}
+        <Btn onClick={verifyCode} sx={{width:"100%",marginBottom:10}} disabled={loading}>{loading?"Verifying…":"Verify & Sign In"}</Btn>
+        <div style={{textAlign:"center"}}>
+          <button onClick={()=>{setSent(false);setCode("");setError("")}} style={{background:"none",border:"none",color:T.text3,cursor:"pointer",fontSize:12,fontFamily:"inherit",textDecoration:"underline"}}>Use a different email</button>
+        </div>
+      </>}
+
+      <div style={{marginTop:20,fontSize:11,color:T.text3,lineHeight:1.7,textAlign:"center"}}>
+        💡 No password needed — enter the code from your email.<br/>Your projects will sync automatically across all signed-in devices.
+      </div>
+    </div>
+  </div>);
+}
+
+// ── ACCOUNT SCREEN ────────────────────────────────────────────────────────────
+function AccountScreen({session,syncStatus,onClose}){
+  const [signingOut,setSigningOut]=useState(false);
+  async function signOut(){
+    setSigningOut(true);
+    await supabase.auth.signOut();
+    lsSave("cq-skip-login",false);
+    window.location.reload();
+  }
+  const statusInfo={
+    idle:{label:"Not synced",color:T.text3,icon:"○"},
+    syncing:{label:"Syncing…",color:T.blue,icon:"↻"},
+    synced:{label:"Synced",color:T.green,icon:"✓"},
+    error:{label:"Sync error — will retry",color:T.red,icon:"⚠"},
+  }[syncStatus]||{label:"",color:T.text3,icon:"○"};
+
+  return(<div style={{minHeight:"100dvh",background:T.bg0,color:T.text,fontFamily:"'Courier New','Lucida Console',monospace",display:"flex",flexDirection:"column"}}>
+    <div style={{borderBottom:`1px solid ${T.border}`,padding:`calc(14px + env(safe-area-inset-top)) 15px 13px`,display:"flex",alignItems:"center",gap:10,background:T.bg0,position:"sticky",top:0,zIndex:50}}>
+      <button onClick={onClose} style={{background:"none",border:"none",color:T.text2,cursor:"pointer",fontSize:22,width:36,height:36,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
+      <h1 style={{margin:0,fontSize:16,fontWeight:900,color:T.accent,letterSpacing:"0.07em"}}>Account & Sync</h1>
+    </div>
+    <div style={{flex:1,padding:"16px 15px",maxWidth:680,margin:"0 auto",width:"100%"}}>
+      <div style={{background:T.bg1,border:`1px solid ${T.border}`,borderRadius:10,padding:"16px",marginBottom:16}}>
+        <div style={{fontSize:11,color:T.text3,letterSpacing:"0.08em",textTransform:"uppercase",fontWeight:700,marginBottom:8}}>Signed in as</div>
+        <div style={{fontSize:15,fontWeight:700,color:T.text}}>{session?.user?.email||"Unknown"}</div>
+      </div>
+
+      <div style={{background:T.bg1,border:`1px solid ${T.border}`,borderRadius:10,padding:"16px",marginBottom:16,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <div>
+          <div style={{fontSize:11,color:T.text3,letterSpacing:"0.08em",textTransform:"uppercase",fontWeight:700,marginBottom:4}}>Cloud Sync</div>
+          <div style={{fontSize:13,color:T.text2}}>Your projects, paints and log sync automatically.</div>
+        </div>
+        <div style={{fontSize:13,fontWeight:700,color:statusInfo.color,whiteSpace:"nowrap",flexShrink:0,marginLeft:10}}>{statusInfo.icon} {statusInfo.label}</div>
+      </div>
+
+      <div style={{background:T.blue+"10",border:`1px solid ${T.blue}25`,borderRadius:8,padding:"12px 14px",marginBottom:20,fontSize:12,color:T.text2,lineHeight:1.7}}>
+        💡 Sign in with the same email on another device to see the same projects there.
+      </div>
+
+      <Btn v="del" onClick={signOut} disabled={signingOut} sx={{width:"100%"}}>{signingOut?"Signing out…":"Sign Out"}</Btn>
+    </div>
+  </div>);
+}
+
+const SC={
+  painted:{label:"Painted",color:T.green,bg:"rgba(45,138,78,0.14)",icon:"🎨"},
+  built:{label:"Built",color:T.blue,bg:"rgba(26,111,170,0.14)",icon:"🔧"},
+  unpainted:{label:"Unpainted",color:T.yellow,bg:"rgba(176,125,26,0.14)",icon:"⬜"},
+  new_in_box:{label:"New in Box",color:T.accent,bg:"rgba(124,77,204,0.14)",icon:"📦"},
+};
+const STATUS_ORDER=["new_in_box","unpainted","built","painted"];
+const PHASES=["Base","Shade","Layer","Highlight","Drybrush","Edge Highlight","Glaze","Varnish","Other"];
+const STEP_COLS=[T.accent,T.blue,T.green,T.yellow,T.red,T.orange,"#7c3aed","#0891b2","#db2777"];
+const MRP=1;
+
+const getStats=p=>{const s={painted:0,built:0,unpainted:0,new_in_box:0,total:0};p.units.forEach(u=>{s[u.status]+=u.models;s.total+=u.models});return s};
+function exportCSV(data){const rows=[["Project","Faction","Unit","Models","Status","Notes"]];data.projects.forEach(p=>p.units.forEach(u=>rows.push([p.name,p.faction||"",u.name,u.models,SC[u.status].label,(u.notes||"").replace(/\n/g," | ")])));const csv=rows.map(r=>r.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(",")).join("\n");const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"}));a.download="colorquest.csv";a.click()}
+function dlJSON(obj,fn){const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([JSON.stringify(obj,null,2)],{type:"application/json"}));a.download=fn;a.click()}
+function exportProject(p){dlJSON({_mrp:MRP,exported:new Date().toISOString(),project:p},p.name.replace(/[^a-z0-9]/gi,"_")+".mrp")}
+function exportAll(d){dlJSON({_mrp:MRP,exported:new Date().toISOString(),projects:d.projects},"colorquest-backup.mrp")}
+function toBase64(f){return new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result);r.onerror=rej;r.readAsDataURL(f)})}
+function readText(f){return new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result);r.onerror=rej;r.readAsText(f)})}
+async function parseImport(file){try{const p=JSON.parse(await readText(file));if(!p._mrp)return{ok:false,error:"Not a valid .mrp file."};const raw=p.projects?p.projects:p.project?[p.project]:null;if(!raw?.length)return{ok:false,error:"No projects found."};for(const x of raw)if(!x.name||!Array.isArray(x.units))return{ok:false,error:"Invalid data."};return{ok:true,projects:raw}}catch{return{ok:false,error:"Could not read file."}}}
+
+// ── Base UI ───────────────────────────────────────────────────────────────────
+const IS={width:"100%",background:T.bg2,border:`1px solid ${T.border}`,borderRadius:7,color:T.text,padding:"9px 12px",fontSize:14,fontFamily:"inherit",outline:"none",boxSizing:"border-box"};
+const LS={display:"block",color:T.text2,fontSize:11,marginBottom:5,fontWeight:700,letterSpacing:"0.07em",textTransform:"uppercase"};
+const Field=({label,children,mb=13})=><div style={{marginBottom:mb}}>{label&&<label style={LS}>{label}</label>}{children}</div>;
+const Inp=({label,mb,...p})=><Field label={label} mb={mb}><input {...p} style={{...IS,...p.style}}/></Field>;
+const Txt=({label,...p})=><Field label={label}><textarea {...p} style={{...IS,resize:"vertical",minHeight:80,lineHeight:1.5,...p.style}}/></Field>;
+const Sel=({label,children,...p})=><Field label={label}><select {...p} style={{...IS,cursor:"pointer",appearance:"none",WebkitAppearance:"none"}}>{children}</select></Field>;
+
+function Btn({v="pri",sm,children,sx={},...p}){
+  const M={pri:{background:T.accent,color:"#fff",border:"none"},sec:{background:"transparent",color:T.text2,border:`1px solid ${T.border}`},del:{background:"transparent",color:T.red,border:`1px solid ${T.red}30`},ok:{background:T.green+"22",color:T.green,border:`1px solid ${T.green}40`},blue:{background:T.blue+"22",color:T.blue,border:`1px solid ${T.blue}40`},orange:{background:T.orange+"22",color:T.orange,border:`1px solid ${T.orange}40`}};
+  return<button {...p} style={{padding:sm?"6px 12px":"10px 16px",borderRadius:7,cursor:"pointer",fontWeight:700,fontSize:sm?12:14,fontFamily:"inherit",transition:"opacity 0.15s",...M[v],...sx}} onMouseEnter={e=>e.currentTarget.style.opacity="0.72"} onMouseLeave={e=>e.currentTarget.style.opacity="1"}>{children}</button>;
+}
+const Badge=({status})=>{const c=SC[status];return<span style={{background:c.bg,color:c.color,border:`1px solid ${c.color}35`,borderRadius:5,padding:"3px 9px",fontSize:11,fontWeight:700,letterSpacing:"0.06em",textTransform:"uppercase"}}>{c.icon} {c.label}</span>};
+function Bar({stats}){if(!stats.total)return null;return<div style={{display:"flex",gap:2,height:6,borderRadius:3,overflow:"hidden",margin:"8px 0 4px"}}>{Object.entries(SC).map(([k,c])=>stats[k]>0&&<div key={k} title={`${c.label}: ${stats[k]}`} style={{flex:stats[k],background:c.color,opacity:0.85}}/>)}</div>}
+function Modal({title,onClose,children,wide,fullscreen}){return(<div style={{position:"fixed",inset:0,background:fullscreen?"#f5f0e8":"rgba(0,0,0,0.75)",display:"flex",alignItems:fullscreen?"flex-start":"center",justifyContent:"center",zIndex:300,padding:fullscreen?0:14,overflowY:fullscreen?"auto":"hidden"}} onClick={fullscreen?undefined:onClose}><div style={{background:T.bg1,border:fullscreen?"none":`1px solid ${T.border}`,borderRadius:fullscreen?0:14,padding:fullscreen?"0":"22px 20px 18px",width:"100%",maxWidth:fullscreen?"100%":wide?600:450,maxHeight:fullscreen?"none":"92vh",overflowY:fullscreen?"visible":"auto",boxShadow:fullscreen?"none":"0 32px 80px rgba(0,0,0,0.6)",minHeight:fullscreen?"100dvh":"auto"}} onClick={e=>e.stopPropagation()}>{!fullscreen&&<div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}><h3 style={{margin:0,color:T.text,fontSize:15,fontFamily:"inherit",fontWeight:900}}>{title}</h3><button onClick={onClose} style={{background:"none",border:"none",color:T.text3,cursor:"pointer",fontSize:26,width:32,height:32,display:"flex",alignItems:"center",justifyContent:"center"}}>×</button></div>}{children}</div></div>);}
+function TabBar({tabs,active,onChange}){return(<div style={{display:"flex",gap:3,background:T.bg2,borderRadius:8,padding:3,marginBottom:14,border:`1px solid ${T.border}`}}>{tabs.map(t=><button key={t.id} onClick={()=>onChange(t.id)} style={{flex:1,padding:"8px 6px",borderRadius:6,border:"none",cursor:"pointer",fontWeight:700,fontSize:11,fontFamily:"inherit",letterSpacing:"0.04em",textTransform:"uppercase",transition:"all 0.15s",background:active===t.id?T.accentDim:"transparent",color:active===t.id?T.accent:T.text3,borderBottom:active===t.id?`2px solid ${T.accent}`:"2px solid transparent"}}>{t.label}</button>)}</div>)}
+
+let _pc=0;
+function PhotoUpload({value,onChange}){
+  const [uid]=useState(()=>"pu-"+(++_pc));
+  return(<Field label="Photo (optional)"><div style={{display:"flex",gap:12,alignItems:"flex-start"}}>{value&&<div style={{position:"relative",flexShrink:0}}><img src={value} alt="" style={{width:72,height:72,objectFit:"cover",borderRadius:8,border:`1px solid ${T.border}`,display:"block"}}/><button type="button" onClick={()=>onChange(null)} style={{position:"absolute",top:-7,right:-7,background:T.red,border:`2px solid ${T.bg0}`,borderRadius:"50%",width:20,height:20,cursor:"pointer",color:"#fff",fontSize:11,lineHeight:"16px",padding:0,fontWeight:700}}>×</button></div>}<label htmlFor={uid} style={{width:72,height:72,border:`2px dashed ${T.border2}`,borderRadius:8,background:T.bg2,cursor:"pointer",color:T.text3,fontSize:26,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,userSelect:"none",WebkitUserSelect:"none"}}>{value?"↺":"+"}<input id={uid} type="file" accept="image/*" capture="environment" style={{display:"none",position:"absolute",opacity:0,width:0,height:0}} onChange={async e=>{if(e.target.files?.[0]){const b=await toBase64(e.target.files[0]);onChange(b);e.target.value=""}}}/></label><div style={{fontSize:12,color:T.text3,lineHeight:1.7,paddingTop:4}}>{value?"Tap ↺ to change\n× to remove":"Tap + to upload\nfrom camera"}</div></div></Field>);
+}
+
+// ── Paint hooks ───────────────────────────────────────────────────────────────
+function usePaints(){
+  const [paints,setPaints]=useState(()=>lsLoad(SK_PAINTS,DEFAULT_PAINTS));
+  useEffect(()=>{lsSave(SK_PAINTS,paints)},[paints]);
+  const addPaint=p=>{const np={...p,id:"p"+Date.now(),owned:p.owned!==undefined?p.owned:true};setPaints(ps=>[...ps,np]);return np};
+  const delPaint=id=>setPaints(ps=>ps.filter(p=>p.id!==id));
+  const toggleOwned=id=>setPaints(ps=>ps.map(p=>p.id===id?{...p,owned:!p.owned}:p));
+  return{paints,addPaint,delPaint,toggleOwned,setPaints};
+}
+
+// ── Paint picker ──────────────────────────────────────────────────────────────
+function PaintPicker({step,onChange,paints,addPaint}){
+  const brands=useMemo(()=>[...new Set(paints.map(p=>p.brand))].sort(),[paints]);
+  const typesForBrand=useMemo(()=>{if(!step.brand)return[...new Set(paints.map(p=>p.type))].sort();return[...new Set(paints.filter(p=>p.brand===step.brand).map(p=>p.type))].sort()},[paints,step.brand]);
+  const paintsForSelection=useMemo(()=>paints.filter(p=>(!step.brand||p.brand===step.brand)&&(!step.type||p.type===step.type)).sort((a,b)=>a.name.localeCompare(b.name)),[paints,step.brand,step.type]);
+  const inLibrary=useMemo(()=>!!step.paint&&paints.some(p=>p.name.toLowerCase()===step.paint.toLowerCase()&&(!step.brand||p.brand===step.brand)&&(!step.type||p.type===step.type)),[paints,step]);
+  const selectedPaint=useMemo(()=>paints.find(p=>p.name===step.paint&&(!step.brand||p.brand===step.brand)),[paints,step]);
+  const [savingNew,setSavingNew]=useState(false);
+  const [newName,setNewName]=useState("");
+  function handleSaveNew(){if(!newName.trim())return;addPaint({brand:step.brand||"Unknown",type:step.type||"Unknown",name:newName.trim(),owned:true});onChange({...step,paint:newName.trim()});setSavingNew(false);setNewName("")}
+  const ss={...IS,padding:"8px 10px",fontSize:13};
+  return(<div style={{display:"flex",flexDirection:"column",gap:6}}>
+    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
+      <div><label style={{...LS,marginBottom:3}}>Brand</label><select value={step.brand||""} onChange={e=>{onChange({...step,brand:e.target.value,type:"",paint:""})}} style={ss}><option value="">All brands</option>{brands.map(b=><option key={b} value={b}>{b}</option>)}</select></div>
+      <div><label style={{...LS,marginBottom:3}}>Type</label><select value={step.type||""} onChange={e=>{onChange({...step,type:e.target.value,paint:""})}} style={ss}><option value="">All types</option>{typesForBrand.map(t=><option key={t} value={t}>{t}</option>)}</select></div>
+    </div>
+    <div>
+      <label style={{...LS,marginBottom:3}}>Paint {selectedPaint&&<span style={{fontWeight:400,textTransform:"none",letterSpacing:0,color:selectedPaint.owned?T.green:T.red}}>{selectedPaint.owned?"● owned":"○ need to buy"}</span>}</label>
+      <select value={step.paint||""} onChange={e=>onChange({...step,paint:e.target.value})} style={ss}><option value="">— Select paint —</option>{paintsForSelection.map(p=><option key={p.id} value={p.name}>{p.name}{p.owned===false?" ○":""}</option>)}</select>
+    </div>
+    {step.paint&&!inLibrary&&!savingNew&&(<div style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:T.yellow+"18",border:`1px solid ${T.yellow}35`,borderRadius:6,padding:"7px 10px"}}><span style={{fontSize:12,color:T.yellow}}>"{step.paint}" not in library</span><Btn sm v="ok" onClick={()=>{setSavingNew(true);setNewName(step.paint)}}>+ Save</Btn></div>)}
+    {!step.paint&&!savingNew&&(<button onClick={()=>setSavingNew(true)} style={{background:"none",border:`1px dashed ${T.border2}`,borderRadius:6,padding:"7px 10px",fontSize:12,color:T.text3,cursor:"pointer",textAlign:"left",fontFamily:"inherit"}}>+ Type a paint not in the list…</button>)}
+    {savingNew&&(<div style={{background:T.bg1,border:`1px solid ${T.border}`,borderRadius:7,padding:"10px 12px"}}><div style={{fontSize:11,color:T.text2,fontWeight:700,marginBottom:7,letterSpacing:"0.05em",textTransform:"uppercase"}}>Add paint to library</div><input value={newName} onChange={e=>setNewName(e.target.value)} placeholder="Paint name…" style={{...IS,marginBottom:7,fontSize:13}} autoFocus/>{!step.brand&&<input value={step.brand||""} onChange={e=>onChange({...step,brand:e.target.value})} placeholder="Brand (e.g. Citadel)…" style={{...IS,marginBottom:7,fontSize:13}}/>}{!step.type&&<input value={step.type||""} onChange={e=>onChange({...step,type:e.target.value})} placeholder="Type (e.g. Base, Shade)…" style={{...IS,marginBottom:7,fontSize:13}}/>}<div style={{display:"flex",gap:7}}><Btn sm v="sec" onClick={()=>{setSavingNew(false);setNewName("")}}>Cancel</Btn><Btn sm v="ok" onClick={handleSaveNew}>Save to Library</Btn></div></div>)}
+  </div>);
+}
+
+// ── Step builder ──────────────────────────────────────────────────────────────
+function newStep(){return{phase:"Base",paint:"",brand:"",type:"",notes:""}}
+function StepRow({step,idx,onChange,onDelete,paints,addPaint}){
+  const col=STEP_COLS[idx%STEP_COLS.length];
+  return(<div style={{background:T.bg2,border:`1px solid ${T.border}`,borderRadius:9,padding:"12px 13px",marginBottom:8}}>
+    <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:10}}>
+      <div style={{width:22,height:22,borderRadius:5,background:col+"25",border:`1px solid ${col}60`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:900,color:col,flexShrink:0}}>{idx+1}</div>
+      <div style={{flex:1}}><label style={{...LS,marginBottom:3}}>Phase</label><select value={step.phase} onChange={e=>onChange({...step,phase:e.target.value})} style={{...IS,padding:"6px 9px",fontSize:13}}>{PHASES.map(ph=><option key={ph} value={ph}>{ph}</option>)}</select></div>
+      <button onClick={onDelete} style={{background:"none",border:"none",color:T.text3,cursor:"pointer",fontSize:18,width:28,height:28,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,marginTop:18}}>×</button>
+    </div>
+    <PaintPicker step={step} onChange={onChange} paints={paints} addPaint={addPaint}/>
+    <div style={{marginTop:8}}><label style={{...LS,marginBottom:3}}>Notes</label><input value={step.notes} onChange={e=>onChange({...step,notes:e.target.value})} placeholder="e.g. thin 1:1, edge only…" style={{...IS,fontSize:12,padding:"7px 10px"}}/></div>
+  </div>);
+}
+
+// ── Recipe card ───────────────────────────────────────────────────────────────
+function RecipeCard({recipe,onEdit,onDelete,readOnly,onStartPainting}){
+  const [expanded,setExpanded]=useState(true);
+  const steps=Array.isArray(recipe.steps)?recipe.steps:[];
+  return(<div style={{background:T.bg1,border:`1px solid ${T.border}`,borderRadius:10,padding:"13px 14px",marginBottom:9}}>
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:expanded?10:0}}>
+      <div style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",flex:1}} onClick={()=>setExpanded(e=>!e)}>
+        <span style={{fontSize:16}}>🎨</span>
+        <span style={{fontWeight:800,color:T.text,fontSize:14}}>{recipe.name}</span>
+        <span style={{fontSize:11,color:T.text3,marginLeft:4}}>{steps.length} step{steps.length!==1?"s":""}</span>
+        <span style={{fontSize:12,color:T.text3,marginLeft:"auto",paddingRight:8}}>{expanded?"▲":"▼"}</span>
+      </div>
+      <div style={{display:"flex",gap:6,flexShrink:0}}>
+        {!readOnly&&steps.length>0&&<Btn sm v="blue" onClick={()=>onStartPainting(recipe)}>▶ Paint</Btn>}
+        {!readOnly&&<Btn sm v="sec" onClick={()=>onEdit(recipe)}>Edit</Btn>}
+        {!readOnly&&<Btn sm v="del" onClick={()=>onDelete(recipe.id)}>✕</Btn>}
+      </div>
+    </div>
+    {expanded&&<div style={{display:"flex",flexDirection:"column",gap:6}}>
+      {steps.map((step,i)=>{const col=STEP_COLS[i%STEP_COLS.length];return(<div key={i} style={{display:"flex",alignItems:"flex-start",gap:9,background:T.bg2,borderRadius:7,padding:"9px 11px"}}><div style={{width:20,height:20,borderRadius:4,background:col+"22",border:`1px solid ${col}50`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:900,color:col,flexShrink:0,marginTop:1}}>{i+1}</div><div style={{flex:1,minWidth:0}}><div style={{fontSize:12}}><span style={{color:T.text3,fontWeight:700}}>{step.phase}: </span><span style={{color:T.text,fontWeight:600}}>{step.paint||<em style={{color:T.text3}}>No paint</em>}</span>{(step.brand||step.type)&&<span style={{color:T.text3,fontSize:11}}> ({[step.brand,step.type].filter(Boolean).join(" — ")})</span>}</div>{step.notes&&<div style={{fontSize:11,color:T.text3,marginTop:3,fontStyle:"italic"}}>{step.notes}</div>}</div></div>)})}
+      {steps.length===0&&<div style={{fontSize:13,color:T.text3,padding:"4px 0"}}>No steps yet.</div>}
+    </div>}
+  </div>);
+}
+
+// ── Recipe editor ─────────────────────────────────────────────────────────────
+function RecipeModal({recipe,onSave,onClose,paints,addPaint}){
+  const [name,setName]=useState(recipe?.name||"");
+  const [steps,setSteps]=useState(()=>recipe?.steps?.length?recipe.steps.map(s=>({...s})):[newStep()]);
+  function updateStep(i,s){setSteps(ss=>ss.map((x,j)=>j===i?s:x))}
+  function removeStep(i){setSteps(ss=>ss.filter((_,j)=>j!==i))}
+  function moveStep(i,dir){setSteps(ss=>{const a=[...ss];const b=a[i];a[i]=a[i+dir];a[i+dir]=b;return a})}
+  function save(){if(!name.trim())return;onSave({...(recipe||{}),name:name.trim(),steps})}
+  return(<Modal title={recipe?"Edit Recipe":"New Recipe"} onClose={onClose} wide>
+    <Inp label="Recipe Name" placeholder="e.g. Skin, Armour, Basing…" value={name} onChange={e=>setName(e.target.value)} autoFocus/>
+    <div style={{marginBottom:8}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}><label style={LS}>Steps</label><Btn sm v="blue" onClick={()=>setSteps(ss=>[...ss,newStep()])}>+ Add Step</Btn></div>
+      {steps.map((step,i)=>(<div key={i}><StepRow step={step} idx={i} onChange={s=>updateStep(i,s)} onDelete={()=>removeStep(i)} paints={paints} addPaint={addPaint}/>{steps.length>1&&<div style={{display:"flex",gap:6,marginTop:-4,marginBottom:8,paddingLeft:30}}>{i>0&&<button onClick={()=>moveStep(i,-1)} style={{background:"none",border:"none",color:T.text3,cursor:"pointer",fontSize:11,padding:0}}>↑ Move up</button>}{i<steps.length-1&&<button onClick={()=>moveStep(i,1)} style={{background:"none",border:"none",color:T.text3,cursor:"pointer",fontSize:11,padding:0}}>↓ Move down</button>}</div>}</div>))}
+      {steps.length===0&&<div style={{textAlign:"center",padding:"16px 0",color:T.text3,fontSize:13}}>No steps yet</div>}
+    </div>
+    <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:6}}><Btn v="sec" sm onClick={onClose}>Cancel</Btn><Btn sm onClick={save}>{recipe?"Save Changes":"Add Recipe"}</Btn></div>
+  </Modal>);
+}
+
+// ── ▶ PAINTING MODE (fullscreen step-by-step guide) ───────────────────────────
+function PaintingMode({recipe,onClose,paints}){
+  const steps=recipe.steps||[];
+  const [idx,setIdx]=useState(0);
+  const [done,setDone]=useState(new Set());
+  const step=steps[idx];
+  const col=STEP_COLS[idx%STEP_COLS.length];
+  const allDone=done.size===steps.length;
+  const selectedPaint=useMemo(()=>step&&paints.find(p=>p.name===step.paint&&(!step.brand||p.brand===step.brand)),[paints,step]);
+
+  if(steps.length===0)return null;
+
+  function markDone(){setDone(d=>new Set([...d,idx]));if(idx<steps.length-1)setIdx(i=>i+1)}
+  function prev(){if(idx>0)setIdx(i=>i-1)}
+  function next(){if(idx<steps.length-1)setIdx(i=>i+1)}
+
+  return(<Modal fullscreen onClose={onClose}>
+    {/* Header */}
+    <div style={{display:"flex",alignItems:"center",gap:12,padding:"calc(14px + env(safe-area-inset-top)) 16px 14px",borderBottom:`1px solid ${T.border}`,position:"sticky",top:0,background:T.bg1,zIndex:10}}>
+      <button onClick={onClose} style={{background:"none",border:"none",color:T.text2,cursor:"pointer",fontSize:22,width:36,height:36,display:"flex",alignItems:"center",justifyContent:"center"}}>×</button>
+      <div style={{flex:1,minWidth:0}}>
+        <div style={{fontSize:10,color:T.text3,letterSpacing:"0.12em",textTransform:"uppercase"}}>Painting Mode</div>
+        <div style={{fontWeight:900,fontSize:15,color:T.text}}>{recipe.name}</div>
+      </div>
+      <div style={{fontSize:12,color:T.text3,fontWeight:700}}>{idx+1}/{steps.length}</div>
+    </div>
+
+    {/* Progress dots */}
+    <div style={{display:"flex",gap:4,padding:"12px 16px 0",justifyContent:"center"}}>
+      {steps.map((_,i)=><div key={i} onClick={()=>setIdx(i)} style={{width:i===idx?24:8,height:8,borderRadius:4,background:done.has(i)?T.green:i===idx?T.accent:T.border,transition:"all 0.2s",cursor:"pointer"}}/>)}
+    </div>
+
+    {/* Step content */}
+    <div style={{padding:"20px 16px",flex:1,maxWidth:500,margin:"0 auto",width:"100%"}}>
+      {/* Step number + phase */}
+      <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:20}}>
+        <div style={{width:48,height:48,borderRadius:12,background:col+"20",border:`2px solid ${col}60`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,fontWeight:900,color:col,flexShrink:0}}>{idx+1}</div>
+        <div>
+          <div style={{fontSize:11,color:T.text3,letterSpacing:"0.1em",textTransform:"uppercase",fontWeight:700}}>Step {idx+1}</div>
+          <div style={{fontSize:22,fontWeight:900,color:T.text,lineHeight:1.1}}>{step.phase}</div>
+        </div>
+        {done.has(idx)&&<div style={{marginLeft:"auto",fontSize:22}}>✅</div>}
+      </div>
+
+      {/* Paint info card */}
+      <div style={{background:T.bg2,border:`1px solid ${T.border}`,borderRadius:12,padding:"18px",marginBottom:16,textAlign:"center"}}>
+        <div style={{fontSize:24,marginBottom:8}}>🎨</div>
+        <div style={{fontSize:22,fontWeight:900,color:T.text,marginBottom:6}}>{step.paint||<em style={{color:T.text3,fontSize:16}}>No paint specified</em>}</div>
+        {(step.brand||step.type)&&<div style={{fontSize:13,color:T.text3}}>{[step.brand,step.type].filter(Boolean).join(" — ")}</div>}
+        {selectedPaint&&<div style={{marginTop:8,fontSize:12,fontWeight:700,color:selectedPaint.owned?T.green:T.red}}>{selectedPaint.owned?"✓ You own this paint":"✗ You need to buy this paint"}</div>}
+      </div>
+
+      {/* Notes */}
+      {step.notes&&<div style={{background:T.yellow+"14",border:`1px solid ${T.yellow}30`,borderRadius:8,padding:"12px 14px",marginBottom:16,fontSize:13,color:T.text2,lineHeight:1.6}}>💡 {step.notes}</div>}
+
+      {/* Actions */}
+      {allDone
+        ? <div style={{textAlign:"center",padding:"20px 0"}}><div style={{fontSize:36,marginBottom:12}}>🎉</div><div style={{fontSize:18,fontWeight:900,color:T.green,marginBottom:8}}>Recipe Complete!</div><div style={{fontSize:13,color:T.text3,marginBottom:20}}>All {steps.length} steps done.</div><Btn onClick={onClose} sx={{width:"100%"}}>Done</Btn></div>
+        : <button onClick={markDone} style={{width:"100%",background:done.has(idx)?T.bg2:T.accent,color:done.has(idx)?T.text2:"#fff",border:`1px solid ${done.has(idx)?T.border:"transparent"}`,borderRadius:10,padding:"16px",fontSize:16,fontWeight:900,cursor:"pointer",fontFamily:"inherit",transition:"all 0.2s"}}>
+            {done.has(idx)?"✓ Done — tap to re-mark":"✓ Step Complete"}
+          </button>
+      }
+    </div>
+
+    {/* Prev / Next */}
+    <div style={{display:"flex",gap:8,padding:"16px",borderTop:`1px solid ${T.border}`,paddingBottom:"calc(16px + env(safe-area-inset-bottom))"}}>
+      <Btn v="sec" onClick={prev} sx={{flex:1,opacity:idx===0?0.4:1}} disabled={idx===0}>← Prev</Btn>
+      <Btn v="sec" onClick={next} sx={{flex:1,opacity:idx===steps.length-1?0.4:1}} disabled={idx===steps.length-1}>Next →</Btn>
+    </div>
+  </Modal>);
+}
+
+// ── Unit card with long-press / tap status cycle ──────────────────────────────
+function UnitCard({unit,onEdit,onDelete,onStatusChange,onSplit}){
+  const [pressing,setPressing]=useState(false);
+  const timerRef=useRef(null);
+  const nextStatus=()=>{const i=STATUS_ORDER.indexOf(unit.status);return STATUS_ORDER[(i+1)%STATUS_ORDER.length]};
+
+  function startPress(e){e.preventDefault();timerRef.current=setTimeout(()=>{setPressing(false);onSplit(unit)},600);setPressing(true)}
+  function endPress(){clearTimeout(timerRef.current);setPressing(false)}
+
+  return(<div style={{background:T.bg1,border:`1px solid ${pressing?T.accent:T.border}`,borderRadius:10,padding:"13px 14px",marginBottom:9,transition:"border-color 0.15s"}}>
+    <div style={{display:"flex",gap:10,alignItems:"flex-start"}}>
+      {unit.photo&&<img src={unit.photo} alt="" style={{width:60,height:60,objectFit:"cover",borderRadius:8,border:`1px solid ${T.border}`,flexShrink:0}}/>}
+      <div style={{flex:1,minWidth:0}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:6}}>
+          <div style={{fontWeight:800,fontSize:14,color:T.text}}>{unit.name}</div>
+          <div style={{display:"flex",gap:5,flexShrink:0}}>
+            <Btn sm v="sec" onClick={()=>onEdit(unit)}>Edit</Btn>
+            <Btn sm v="del" onClick={()=>onDelete(unit.id)}>✕</Btn>
+          </div>
+        </div>
+        <div style={{display:"flex",alignItems:"center",gap:8,marginTop:5,flexWrap:"wrap"}}>
+          {/* Tap status badge to cycle */}
+          <button onTouchStart={startPress} onTouchEnd={endPress} onMouseDown={startPress} onMouseUp={endPress} onMouseLeave={endPress}
+            onClick={()=>onStatusChange(unit.id,nextStatus())}
+            style={{background:"none",border:"none",padding:0,cursor:"pointer",WebkitTapHighlightColor:"transparent"}}
+            title="Tap to cycle status · Hold to split unit">
+            <Badge status={unit.status}/>
+          </button>
+          <span style={{fontSize:13,color:T.text2}}><span style={{color:T.accent,fontWeight:700}}>{unit.models}</span> model{unit.models!==1?"s":""}</span>
+          <span style={{fontSize:10,color:T.text3,fontStyle:"italic"}}>tap badge to update</span>
+        </div>
+        {/* Subgroups */}
+        {unit.subgroups&&unit.subgroups.length>0&&<div style={{marginTop:8}}>
+          {unit.subgroups.map((sg,i)=><div key={i} style={{display:"flex",alignItems:"center",gap:8,marginBottom:4,paddingLeft:8,borderLeft:`2px solid ${SC[sg.status].color}50`}}>
+            <span style={{fontSize:11,color:T.text3}}>{sg.models}× </span>
+            <Badge status={sg.status}/>
+            <button onClick={()=>{const sgs=unit.subgroups.filter((_,j)=>j!==i);onEdit({...unit,subgroups:sgs.length?sgs:null})}} style={{background:"none",border:"none",color:T.text3,cursor:"pointer",fontSize:12,padding:0,marginLeft:"auto"}}>×</button>
+          </div>)}
+        </div>}
+        {unit.notes&&<div style={{marginTop:7,fontSize:12,color:T.text2,lineHeight:1.55,borderLeft:`2px solid ${T.border}`,paddingLeft:8,whiteSpace:"pre-wrap"}}>{unit.notes}</div>}
+      </div>
+    </div>
+  </div>);
+}
+
+// ── Split unit modal ──────────────────────────────────────────────────────────
+function SplitModal({unit,onSave,onClose}){
+  const [splitCount,setSplitCount]=useState(Math.floor(unit.models/2));
+  const [splitStatus,setSplitStatus]=useState("painted");
+  const remaining=unit.models-splitCount;
+  function save(){
+    if(splitCount<1||splitCount>=unit.models)return;
+    const existing=unit.subgroups||[];
+    const newSg=[...existing,{models:splitCount,status:splitStatus},{models:remaining,status:unit.status}];
+    onSave({...unit,subgroups:newSg});
+    onClose();
+  }
+  return(<Modal title={`Split: ${unit.name}`} onClose={onClose}>
+    <div style={{background:T.bg2,borderRadius:8,padding:"12px",marginBottom:14,fontSize:13,color:T.text2,lineHeight:1.6}}>Split this unit into two sub-groups with different statuses — useful when only some models are painted.</div>
+    <Inp label={`Models in first group (of ${unit.models})`} type="number" min={1} max={unit.models-1} value={splitCount} onChange={e=>setSplitCount(Math.max(1,Math.min(unit.models-1,parseInt(e.target.value)||1)))}/>
+    <Sel label="Status for first group" value={splitStatus} onChange={e=>setSplitStatus(e.target.value)}>{Object.entries(SC).map(([k,v])=><option key={k} value={k}>{v.icon} {v.label}</option>)}</Sel>
+    <div style={{background:T.bg2,borderRadius:8,padding:"10px 12px",marginBottom:14,fontSize:13}}>
+      <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}><span style={{color:T.text2}}>Group 1:</span><span style={{fontWeight:700,color:SC[splitStatus].color}}>{splitCount}× {SC[splitStatus].label}</span></div>
+      <div style={{display:"flex",justifyContent:"space-between"}}><span style={{color:T.text2}}>Group 2:</span><span style={{fontWeight:700,color:SC[unit.status].color}}>{remaining}× {SC[unit.status].label}</span></div>
+    </div>
+    <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}><Btn v="sec" sm onClick={onClose}>Cancel</Btn><Btn sm onClick={save}>Split Unit</Btn></div>
+  </Modal>);
+}
+
+// ── Paint log ─────────────────────────────────────────────────────────────────
+function usePaintLog(){
+  const [log,setLog]=useState(()=>lsLoad(SK_LOG,[]));
+  useEffect(()=>{lsSave(SK_LOG,log)},[log]);
+  const addEntry=(projectName,unitName,count,fromStatus,toStatus)=>{setLog(l=>[{id:Date.now(),date:new Date().toISOString().slice(0,10),projectName,unitName,count,fromStatus,toStatus},...l].slice(0,500))};
+  return{log,addEntry,setLog};
+}
+
+// ── Paint Library ─────────────────────────────────────────────────────────────
+function PaintLibrary({paints,addPaint,delPaint,toggleOwned,onClose}){
+  const [form,setForm]=useState({brand:"",type:"",name:"",owned:true});
+  const [search,setSearch]=useState("");
+  const [showNeedToBuy,setShowNeedToBuy]=useState(false);
+  const filtered=useMemo(()=>{let r=paints.filter(p=>(p.name+" "+p.brand+" "+p.type).toLowerCase().includes(search.toLowerCase()));if(showNeedToBuy)r=r.filter(p=>!p.owned);return r},[paints,search,showNeedToBuy]);
+  const grouped=useMemo(()=>{const g={};filtered.forEach(p=>{const k=p.brand||"Unknown";if(!g[k])g[k]={};const t=p.type||"Uncategorised";if(!g[k][t])g[k][t]=[];g[k][t].push(p)});return g},[filtered]);
+  const needCount=paints.filter(p=>!p.owned).length;
+  function save(){if(!form.name.trim())return;addPaint({...form,name:form.name.trim()});setForm(f=>({...f,name:""}))}
+  return(<div style={{minHeight:"100dvh",background:T.bg0,color:T.text,fontFamily:"'Courier New','Lucida Console',monospace",display:"flex",flexDirection:"column"}}>
+    <div style={{borderBottom:`1px solid ${T.border}`,padding:`calc(14px + env(safe-area-inset-top)) 15px 13px`,display:"flex",alignItems:"center",gap:10,background:T.bg0,position:"sticky",top:0,zIndex:50}}>
+      <button onClick={onClose} style={{background:"none",border:"none",color:T.text2,cursor:"pointer",fontSize:22,width:36,height:36,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
+      <h1 style={{margin:0,fontSize:16,fontWeight:900,color:T.accent,letterSpacing:"0.07em",flex:1}}>🎨 Paint Library</h1>
+      <span style={{fontSize:11,color:T.text3}}>{paints.length} paints</span>
+    </div>
+    <div style={{flex:1,overflowY:"auto",padding:"12px 15px",maxWidth:680,margin:"0 auto",width:"100%",paddingBottom:"24px"}}>
+      {needCount>0&&<div style={{background:T.red+"10",border:`1px solid ${T.red}25`,borderRadius:8,padding:"10px 14px",marginBottom:14,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <span style={{fontSize:13,color:T.red}}>🛒 {needCount} paint{needCount!==1?"s":""} to buy</span>
+        <Btn sm v="sec" onClick={()=>setShowNeedToBuy(n=>!n)}>{showNeedToBuy?"Show all":"Show list"}</Btn>
+      </div>}
+      <div style={{background:T.bg1,border:`1px solid ${T.border}`,borderRadius:10,padding:"14px",marginBottom:16}}>
+        <div style={{fontSize:11,color:T.text3,letterSpacing:"0.08em",textTransform:"uppercase",fontWeight:700,marginBottom:10}}>Add Paint</div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
+          <Inp label="Brand" mb={0} placeholder="Citadel, Vallejo…" value={form.brand} onChange={e=>setForm(f=>({...f,brand:e.target.value}))}/>
+          <Inp label="Type" mb={0} placeholder="Base, Shade…" value={form.type} onChange={e=>setForm(f=>({...f,type:e.target.value}))}/>
+        </div>
+        <div style={{display:"flex",gap:8,alignItems:"flex-end",marginBottom:8}}>
+          <Inp label="Paint Name" mb={0} placeholder="e.g. Macragge Blue" value={form.name} onChange={e=>setForm(f=>({...f,name:e.target.value}))} style={{flex:1}} onKeyDown={e=>e.key==="Enter"&&save()}/>
+          <Btn sm onClick={save} sx={{flexShrink:0,height:38}}>Add</Btn>
+        </div>
+        <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:13,color:T.text2}}>
+          <input type="checkbox" checked={form.owned} onChange={e=>setForm(f=>({...f,owned:e.target.checked}))} style={{width:16,height:16,accentColor:T.accent}}/>
+          I own this paint
+        </label>
+      </div>
+      <div style={{position:"relative",marginBottom:14}}>
+        <span style={{position:"absolute",left:11,top:"50%",transform:"translateY(-50%)",color:T.text3,fontSize:13}}>🔍</span>
+        <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search paints…" style={{...IS,paddingLeft:32}}/>
+        {search&&<button onClick={()=>setSearch("")} style={{position:"absolute",right:8,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",color:T.text3,cursor:"pointer",fontSize:18}}>×</button>}
+      </div>
+      {Object.entries(grouped).map(([brand,types])=>(<div key={brand} style={{marginBottom:12}}>
+        <div style={{fontSize:11,color:T.accent,fontWeight:900,letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:6,padding:"0 2px"}}>{brand}</div>
+        {Object.entries(types).map(([type,ps])=>(<div key={type} style={{background:T.bg1,border:`1px solid ${T.border}`,borderRadius:8,marginBottom:6,overflow:"hidden"}}>
+          <div style={{padding:"6px 12px",fontSize:10,color:T.text3,fontWeight:700,letterSpacing:"0.08em",textTransform:"uppercase",background:T.bg2,borderBottom:`1px solid ${T.border}`}}>{type}</div>
+          {ps.map(p=>(<div key={p.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"9px 12px",borderBottom:`1px solid ${T.border}`}}>
+            <div style={{display:"flex",alignItems:"center",gap:10}}>
+              <button onClick={()=>toggleOwned(p.id)} title={p.owned?"Mark as not owned":"Mark as owned"} style={{background:"none",border:"none",cursor:"pointer",fontSize:16,padding:0,width:24,height:24,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>{p.owned?"✅":"○"}</button>
+              <span style={{fontSize:13,color:p.owned?T.text:T.text3}}>{p.name}</span>
+            </div>
+            <button onClick={()=>delPaint(p.id)} style={{background:"none",border:"none",color:T.text3,cursor:"pointer",fontSize:16,padding:0,width:28,height:28,display:"flex",alignItems:"center",justifyContent:"center"}}>×</button>
+          </div>))}
+        </div>))}
+      </div>))}
+      {filtered.length===0&&<div style={{textAlign:"center",color:T.text3,padding:"40px 0",fontSize:13}}>{search||showNeedToBuy?"No paints match.":"No paints yet!"}</div>}
+    </div>
+  </div>);
+}
+
+// ── Backup reminder banner ────────────────────────────────────────────────────
+function BackupBanner({onExport,onDismiss}){
+  return(<div style={{background:T.yellow+"18",border:`1px solid ${T.yellow}40`,borderRadius:8,padding:"10px 13px",margin:"10px 15px 0",maxWidth:680,marginLeft:"auto",marginRight:"auto",display:"flex",justifyContent:"space-between",alignItems:"center",gap:10}}>
+    <div>
+      <div style={{fontSize:12,fontWeight:700,color:T.yellow}}>💾 Time to back up</div>
+      <div style={{fontSize:11,color:T.text3,marginTop:2}}>It's been 7+ days since your last backup.</div>
+    </div>
+    <div style={{display:"flex",gap:6,flexShrink:0}}>
+      <Btn sm v="ok" onClick={onExport}>↓ Backup</Btn>
+      <Btn sm v="sec" onClick={onDismiss}>Later</Btn>
+    </div>
+  </div>);
+}
+
+// ── Share modal ───────────────────────────────────────────────────────────────
+function ShareModal({project,onClose,onAddToCollection}){
+  const [copied,setCopied]=useState(false);
+  const url=useMemo(()=>buildShareUrl([project]),[project]);
+  const s=getStats(project);
+  function copy(){if(!url)return;const go=()=>{setCopied(true);setTimeout(()=>setCopied(false),2200)};navigator.clipboard?.writeText(url).then(go).catch(()=>{const t=document.createElement("textarea");t.value=url;document.body.appendChild(t);t.select();document.execCommand("copy");document.body.removeChild(t);go()})}
+  return(<Modal title="Share Project" onClose={onClose} wide>
+    <div style={{background:T.bg2,border:`1px solid ${T.border}`,borderRadius:10,padding:"13px 14px",marginBottom:14}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}><div><div style={{fontWeight:800,fontSize:15,color:T.text}}>{project.name}</div>{project.faction&&<div style={{fontSize:11,color:T.text3,marginTop:2}}>{project.faction}</div>}</div><div style={{textAlign:"right"}}><div style={{fontWeight:700,color:T.accent,fontSize:20,lineHeight:1}}>{s.total}</div><div style={{fontSize:10,color:T.text3}}>models</div></div></div>
+      <Bar stats={s}/>
+    </div>
+    <div style={{background:T.blue+"14",border:`1px solid ${T.blue}30`,borderRadius:8,padding:"11px 13px",marginBottom:14,fontSize:12,color:T.text2,lineHeight:1.7}}>
+      👁 <strong style={{color:T.blue}}>Read-only link.</strong> Anyone can browse units and paint recipes but cannot edit.{project.units.some(u=>u.photo)&&<><br/><span style={{color:T.yellow}}>⚠️ Photos not included in link.</span></>}
+    </div>
+    <Field label="Share Link">
+      <div style={{background:T.bg2,border:`1px solid ${T.border}`,borderRadius:6,padding:"10px 12px",fontSize:11,color:T.text3,wordBreak:"break-all",lineHeight:1.6,maxHeight:72,overflow:"hidden",fontFamily:"monospace",marginBottom:4}}>{url||"Could not generate link"}</div>
+      <div style={{fontSize:10,color:T.text3}}>~{url?Math.round(url.length/1024):0} KB · opens in any browser</div>
+    </Field>
+    <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:4}}>
+      <Btn v="pri" onClick={copy} sx={{flex:1}}>{copied?"✓ Copied!":"📋 Copy Link"}</Btn>
+      {!!navigator.share&&<Btn v="blue" onClick={()=>navigator.share({title:project.name+" — ColorQuest",url}).catch(()=>{})} sx={{flex:1}}>📤 Share…</Btn>}
+    </div>
+  </Modal>);
+}
+
+// ── Import modal ──────────────────────────────────────────────────────────────
+function ImportModal({onClose,onImport}){
+  const [uid]=useState(()=>"imp-"+(++_pc));
+  const [state,setState]=useState("idle");const [error,setError]=useState("");const [preview,setPreview]=useState(null);const [selected,setSelected]=useState(new Set());const [mode,setMode]=useState("add");
+  async function handleFile(e){const file=e.target.files?.[0];if(!file)return;setState("loading");const r=await parseImport(file);if(!r.ok){setError(r.error);setState("error");return}setPreview(r.projects);setSelected(new Set(r.projects.map((_,i)=>i)));setState("preview");e.target.value=""}
+  function toggle(i){setSelected(s=>{const n=new Set(s);n.has(i)?n.delete(i):n.add(i);return n})}
+  function doImport(){const c=preview.filter((_,i)=>selected.has(i));if(!c.length)return;onImport(c,mode);onClose()}
+  return(<Modal title="Import Projects" onClose={onClose} wide>
+    {state==="idle"&&<><div style={{background:T.bg2,border:`1px dashed ${T.border2}`,borderRadius:10,padding:"24px 16px",textAlign:"center",marginBottom:14}}><div style={{fontSize:28,marginBottom:8}}>📂</div><div style={{fontSize:13,color:T.text2,marginBottom:14,lineHeight:1.6}}>Select a <span style={{color:T.accent,fontWeight:700}}>.mrp</span> file exported from ColorQuest.</div><label htmlFor={uid} style={{display:"inline-flex",alignItems:"center",gap:8,background:T.accent,color:"#fff",borderRadius:7,padding:"9px 18px",cursor:"pointer",fontWeight:700,fontSize:13,fontFamily:"inherit"}}>📁 Choose File<input id={uid} type="file" accept=".mrp,application/json" style={{display:"none"}} onChange={handleFile}/></label></div></>}
+    {state==="loading"&&<div style={{textAlign:"center",padding:"40px 0",color:T.text2,fontSize:13}}>Reading file…</div>}
+    {state==="error"&&<><div style={{background:T.red+"14",border:`1px solid ${T.red}30`,borderRadius:8,padding:"14px",marginBottom:14,fontSize:13,color:T.red}}>{error}</div><label htmlFor={uid} style={{display:"inline-flex",alignItems:"center",gap:8,background:T.accent,color:"#fff",borderRadius:7,padding:"9px 18px",cursor:"pointer",fontWeight:700,fontSize:13,fontFamily:"inherit"}}>Try Another File<input id={uid} type="file" accept=".mrp,application/json" style={{display:"none"}} onChange={handleFile}/></label></>}
+    {state==="preview"&&preview&&<>
+      <div style={{fontSize:11,color:T.text3,letterSpacing:"0.08em",textTransform:"uppercase",marginBottom:10,fontWeight:700}}>Found {preview.length} project{preview.length!==1?"s":""} — select to import:</div>
+      {preview.map((p,i)=>{const s=getStats(p);const sel=selected.has(i);return(<div key={i} onClick={()=>toggle(i)} style={{background:sel?T.accentDim:T.bg2,border:`1px solid ${sel?T.accent+"60":T.border}`,borderRadius:8,padding:"12px 13px",marginBottom:8,cursor:"pointer"}}><div style={{display:"flex",alignItems:"center",gap:10}}><div style={{width:18,height:18,borderRadius:4,border:`2px solid ${sel?T.accent:T.border2}`,background:sel?T.accent:"transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,fontSize:11,color:"#fff",fontWeight:900}}>{sel?"✓":""}</div><div style={{flex:1,minWidth:0}}><div style={{fontWeight:800,fontSize:14,color:T.text}}>{p.name}</div>{p.faction&&<div style={{fontSize:11,color:T.text3,marginTop:1}}>{p.faction}</div>}</div><div style={{textAlign:"right",flexShrink:0}}><div style={{fontWeight:700,color:T.accent,fontSize:16}}>{s.total}</div><div style={{fontSize:10,color:T.text3}}>models</div></div></div><Bar stats={s}/></div>)})}
+      <div style={{marginTop:14}}><div style={{...LS,marginBottom:8}}>Import mode</div>{[["add","Add to existing projects"],["replace","Replace all existing projects"]].map(([val,label])=>(<div key={val} onClick={()=>setMode(val)} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",borderRadius:8,border:`1px solid ${mode===val?T.accent+"50":T.border}`,background:mode===val?T.accentDim:"transparent",marginBottom:6,cursor:"pointer"}}><div style={{width:16,height:16,borderRadius:"50%",border:`2px solid ${mode===val?T.accent:T.border2}`,background:mode===val?T.accent:"transparent",flexShrink:0}}/><div style={{fontSize:13,color:mode===val?T.text:T.text2}}>{label}</div></div>))}{mode==="replace"&&<div style={{fontSize:11,color:T.red,marginTop:4,padding:"8px 10px",background:T.red+"14",borderRadius:6}}>⚠️ This will permanently delete all current projects.</div>}</div>
+      <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:16}}><Btn v="sec" sm onClick={onClose}>Cancel</Btn><Btn sm onClick={doImport} sx={{opacity:selected.size===0?0.4:1}} disabled={selected.size===0}>Import {selected.size} project{selected.size!==1?"s":""}</Btn></div>
+    </>}
+  </Modal>);
+}
+
+// ── Donut chart ───────────────────────────────────────────────────────────────
+function Donut({stats,size=120}){
+  const r=44,cx=60,cy=60,circ=2*Math.PI*r;
+  if(!stats.total)return<div style={{width:size,height:size,borderRadius:"50%",background:T.bg2,display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,color:T.text3}}>Empty</div>;
+  let off=0;const slices=Object.entries(SC).filter(([k])=>stats[k]>0).map(([k,c])=>{const d=stats[k]/stats.total*circ;const s={key:k,color:c.color,dash:d,off};off+=d;return s});
+  return(<svg width={size} height={size} viewBox="0 0 120 120"><circle cx={cx} cy={cy} r={r} fill="none" stroke={T.bg2} strokeWidth="16"/>{slices.map(s=><circle key={s.key} cx={cx} cy={cy} r={r} fill="none" stroke={s.color} strokeWidth="16" strokeDasharray={`${s.dash} ${circ-s.dash}`} strokeDashoffset={-s.off+circ/4}/>)}<text x={cx} y={cy-5} textAnchor="middle" fill={T.text} fontSize="18" fontWeight="900" fontFamily="inherit">{stats.total}</text><text x={cx} y={cy+12} textAnchor="middle" fill={T.text3} fontSize="9" fontFamily="inherit" letterSpacing="0.1em">MODELS</text></svg>);
+}
+
+// ── Monthly activity chart ────────────────────────────────────────────────────
+function ActivityChart({log}){
+  const months=useMemo(()=>{const m={};const now=new Date();for(let i=5;i>=0;i--){const d=new Date(now.getFullYear(),now.getMonth()-i,1);const key=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;m[key]=0}log.filter(e=>e.toStatus==="painted").forEach(e=>{const key=e.date.slice(0,7);if(m[key]!==undefined)m[m[key]!==undefined?key:""]=m[key]||(m[key]=0,m[key]+=e.count)});// recount
+    const counts={};for(const k of Object.keys(m))counts[k]=0;log.filter(e=>e.toStatus==="painted").forEach(e=>{const k=e.date.slice(0,7);if(counts[k]!==undefined)counts[k]+=e.count});return Object.entries(counts).map(([k,v])=>({label:k.slice(5),count:v}))
+  },[log]);
+  const max=Math.max(...months.map(m=>m.count),1);
+  return(<div style={{background:T.bg1,border:`1px solid ${T.border}`,borderRadius:10,padding:"14px 15px",marginBottom:14}}>
+    <div style={{fontSize:11,color:T.text3,letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:12,fontWeight:700}}>Models Painted — Last 6 Months</div>
+    <div style={{display:"flex",gap:6,alignItems:"flex-end",height:60}}>
+      {months.map(({label,count})=><div key={label} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:3}}>
+        <div style={{fontSize:9,color:T.text3,fontWeight:700}}>{count||""}</div>
+        <div style={{width:"100%",background:count>0?T.accent:T.bg2,borderRadius:3,height:`${Math.max(4,(count/max)*44)}px`,transition:"height 0.4s"}}/>
+        <div style={{fontSize:9,color:T.text3}}>{label}</div>
+      </div>)}
+    </div>
+    {months.every(m=>m.count===0)&&<div style={{textAlign:"center",fontSize:12,color:T.text3,marginTop:8}}>No models marked painted yet — update unit statuses to track progress!</div>}
+  </div>);
+}
+
+// ── Dashboard ─────────────────────────────────────────────────────────────────
+function Dashboard({data,log,onGoToProject}){
+  const g=useMemo(()=>{const g={painted:0,built:0,unpainted:0,new_in_box:0,total:0};data.projects.forEach(p=>{const s=getStats(p);Object.keys(g).forEach(k=>g[k]+=s[k])});return g},[data]);
+  const pp=g.total?Math.round(g.painted/g.total*100):0;
+  const dp=g.total?Math.round((g.painted+g.built)/g.total*100):0;
+  const ranked=[...data.projects].map(p=>{const s=getStats(p);return{...p,stats:s,pct:s.total?Math.round(s.painted/s.total*100):0}}).sort((a,b)=>b.pct-a.pct);
+  const backlog=data.projects.flatMap(p=>p.units.filter(u=>u.status==="unpainted"||u.status==="new_in_box").map(u=>({...u,project:p.name})));
+  const card={background:T.bg1,border:`1px solid ${T.border}`,borderRadius:10,padding:"14px 15px",marginBottom:14};
+  return(<div style={{padding:"12px 15px",maxWidth:680,margin:"0 auto",paddingBottom:"calc(80px + env(safe-area-inset-bottom))"}}>
+    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14,marginTop:6}}>
+      {[{label:"Total Models",val:g.total,color:T.accent},{label:"Painted",val:g.painted,color:T.green},{label:"Projects",val:data.projects.length,color:T.blue},{label:"Paint Recipes",val:data.projects.reduce((a,p)=>a+(p.recipes||[]).length,0),color:T.yellow}].map(({label,val,color})=>(
+        <div key={label} style={{background:T.bg1,border:`1px solid ${T.border}`,borderRadius:10,padding:"14px 15px"}}><div style={{fontSize:28,fontWeight:900,color,lineHeight:1}}>{val}</div><div style={{fontSize:11,color:T.text3,marginTop:4,letterSpacing:"0.05em",textTransform:"uppercase"}}>{label}</div></div>
+      ))}
+    </div>
+    <ActivityChart log={log}/>
+    <div style={{...card,display:"flex",gap:16,alignItems:"center"}}>
+      <Donut stats={g} size={110}/>
+      <div style={{flex:1}}><div style={{fontSize:11,color:T.text3,letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:10,fontWeight:700}}>Collection Status</div>{Object.entries(SC).map(([k,c])=>(<div key={k} style={{display:"flex",alignItems:"center",gap:8,marginBottom:7}}><div style={{width:8,height:8,borderRadius:2,background:c.color,flexShrink:0}}/><div style={{flex:1,fontSize:12,color:T.text2}}>{c.label}</div><div style={{fontSize:13,fontWeight:700,color:c.color,minWidth:28,textAlign:"right"}}>{g[k]}</div><div style={{fontSize:11,color:T.text3,minWidth:34,textAlign:"right"}}>{g.total?Math.round(g[k]/g.total*100):0}%</div></div>))}</div>
+    </div>
+    <div style={card}><div style={{fontSize:11,color:T.text3,letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:12,fontWeight:700}}>Paint Progress</div>
+      {[{label:"🎨 Painted",pct:pp,color:T.green},{label:"🔧 Assembled",pct:dp,color:T.blue}].map(({label,pct,color})=>(<div key={label} style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}><div style={{fontSize:11,color:T.text2,minWidth:80}}>{label}</div><div style={{flex:1,height:8,borderRadius:4,background:T.bg2,overflow:"hidden"}}><div style={{height:"100%",width:`${pct}%`,background:color,borderRadius:4,transition:"width 0.5s"}}/></div><div style={{fontSize:13,fontWeight:700,color,minWidth:36,textAlign:"right"}}>{pct}%</div></div>))}
+    </div>
+    {ranked.length>0&&<div style={card}><div style={{fontSize:11,color:T.text3,letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:12,fontWeight:700}}>Projects by Paint Completion</div>
+      {ranked.map((p,i)=>(<div key={p.id} onClick={()=>onGoToProject(p.id)} style={{display:"flex",alignItems:"center",gap:10,marginBottom:10,cursor:"pointer"}}><div style={{fontSize:12,color:T.text3,minWidth:18,fontWeight:700}}>#{i+1}</div><div style={{flex:1,minWidth:0}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:4}}><div style={{fontSize:13,fontWeight:700,color:T.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:"65%"}}>{p.name}</div><div style={{fontSize:12,color:T.green,fontWeight:700,flexShrink:0}}>{p.pct}%</div></div><div style={{display:"flex",gap:4,alignItems:"center"}}><div style={{flex:1,height:4,borderRadius:2,background:T.bg2,overflow:"hidden"}}><div style={{height:"100%",width:`${p.pct}%`,background:T.green,borderRadius:2}}/></div><div style={{fontSize:10,color:T.text3,flexShrink:0}}>{p.stats.total} models</div></div></div></div>))}
+    </div>}
+    {backlog.length>0&&<div style={card}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}><div style={{fontSize:11,color:T.text3,letterSpacing:"0.1em",textTransform:"uppercase",fontWeight:700}}>Painting Backlog</div><div style={{fontSize:11,color:T.red,fontWeight:700}}>{backlog.reduce((a,u)=>a+u.models,0)} models</div></div>
+      {backlog.slice(0,8).map((u,i)=>(<div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",paddingBottom:7,marginBottom:7,borderBottom:i<Math.min(backlog.length,8)-1?`1px solid ${T.bg2}`:"none"}}><div><div style={{fontSize:13,color:T.text,fontWeight:600}}>{u.name}</div><div style={{fontSize:11,color:T.text3,marginTop:2}}>{u.project}</div></div><div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}><Badge status={u.status}/><div style={{fontSize:12,color:T.text2,minWidth:20,textAlign:"right"}}>{u.models}</div></div></div>))}
+      {backlog.length>8&&<div style={{fontSize:11,color:T.text3,textAlign:"center",paddingTop:4}}>+{backlog.length-8} more…</div>}
+    </div>}
+    {data.projects.length===0&&<div style={{textAlign:"center",color:T.text3,padding:"60px 0",fontSize:14,lineHeight:2}}>No data yet.<br/>Head to Projects to add your first army!</div>}
+  </div>);
+}
+
+// ── Shared viewer ─────────────────────────────────────────────────────────────
+function SharedView({projects,onAddToCollection}){
+  const [idx,setIdx]=useState(null);const [tab,setTab]=useState("units");const p=idx!==null?projects[idx]:null;
+  const banner=<div style={{background:T.orange+"18",borderBottom:`1px solid ${T.orange}35`,padding:"7px 15px",textAlign:"center",fontSize:11,color:T.orange,fontWeight:700,letterSpacing:"0.08em"}}>👁 READ-ONLY SHARED VIEW</div>;
+  if(p){const s=getStats(p);return(<div style={{minHeight:"100dvh",background:T.bg0,color:T.text,fontFamily:"'Courier New','Lucida Console',monospace"}}>{banner}<div style={{borderBottom:`1px solid ${T.border}`,padding:"12px 15px",display:"flex",alignItems:"center",gap:10,background:T.bg0,position:"sticky",top:0,zIndex:50}}><button onClick={()=>{setIdx(null);setTab("units")}} style={{background:"none",border:"none",color:T.text2,cursor:"pointer",fontSize:22,width:36,height:36,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button><div style={{flex:1,minWidth:0}}>{p.faction&&<div style={{fontSize:10,color:T.text3,letterSpacing:"0.15em",textTransform:"uppercase"}}>{p.faction}</div>}<h1 style={{margin:0,fontSize:16,fontWeight:900,color:T.accent,letterSpacing:"0.07em",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{p.name}</h1></div></div><div style={{padding:"12px 15px 40px",maxWidth:680,margin:"0 auto"}}><div style={{background:T.bg1,border:`1px solid ${T.border}`,borderRadius:10,padding:"12px 14px",marginBottom:13,marginTop:6}}><div style={{fontSize:10,color:T.text3,letterSpacing:"0.12em",textTransform:"uppercase",marginBottom:5,fontWeight:700}}>{s.total} models · {p.units.length} units · {(p.recipes||[]).length} recipes</div><Bar stats={s}/><div style={{display:"flex",gap:12,flexWrap:"wrap",marginTop:6}}>{Object.entries(SC).map(([k,c])=><div key={k} style={{fontSize:11}}><span style={{color:T.text3}}>{c.label} </span><span style={{color:c.color,fontWeight:700}}>{s[k]}</span></div>)}</div></div><TabBar tabs={[{id:"units",label:`Units (${p.units.length})`},{id:"recipes",label:`Recipes (${(p.recipes||[]).length})`},{id:"showcase",label:"Showcase"}]} active={tab} onChange={setTab}/>{tab==="units"&&p.units.map(u=>(<div key={u.id} style={{background:T.bg1,border:`1px solid ${T.border}`,borderRadius:10,padding:"13px 14px",marginBottom:9}}><div style={{display:"flex",gap:10,alignItems:"flex-start"}}>{u.photo&&<img src={u.photo} alt="" style={{width:60,height:60,objectFit:"cover",borderRadius:8,border:`1px solid ${T.border}`,flexShrink:0}}/>}<div style={{flex:1,minWidth:0}}><div style={{fontWeight:800,fontSize:14,color:T.text,marginBottom:5}}>{u.name}</div><div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}><Badge status={u.status}/><span style={{fontSize:13,color:T.text2}}><span style={{color:T.accent,fontWeight:700}}>{u.models}</span> model{u.models!==1?"s":""}</span></div>{u.notes&&<div style={{marginTop:7,fontSize:12,color:T.text2,lineHeight:1.55,borderLeft:`2px solid ${T.border}`,paddingLeft:8,whiteSpace:"pre-wrap"}}>{u.notes}</div>}</div></div></div>))}{tab==="recipes"&&(p.recipes||[]).map(r=><RecipeCard key={r.id} recipe={r} readOnly onEdit={()=>{}} onDelete={()=>{}} onStartPainting={()=>{}}/>)}{tab==="showcase"&&(<div><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>{p.units.filter(u=>u.photo).map(u=>(<div key={u.id} style={{borderRadius:8,overflow:"hidden",position:"relative"}}><img src={u.photo} alt={u.name} style={{width:"100%",aspectRatio:"1",objectFit:"cover",display:"block"}}/><div style={{position:"absolute",bottom:0,left:0,right:0,background:"linear-gradient(transparent,rgba(0,0,0,0.7)",padding:"20px 8px 6px"}}><div style={{fontSize:11,fontWeight:700,color:"#fff"}}>{u.name}</div><div style={{marginTop:2}}><Badge status={u.status}/></div></div></div>))}</div>{p.units.filter(u=>u.photo).length===0&&<div style={{textAlign:"center",color:T.text3,padding:"40px 0",fontSize:13}}>No photos in this project.</div>}</div>)}</div></div>);}
+  return(<div style={{minHeight:"100dvh",background:T.bg0,color:T.text,fontFamily:"'Courier New','Lucida Console',monospace"}}>{banner}<div style={{borderBottom:`1px solid ${T.border}`,padding:"14px 15px",background:T.bg0,display:"flex",justifyContent:"space-between",alignItems:"center"}}><div><h1 style={{margin:0,fontSize:16,fontWeight:900,color:T.accent,letterSpacing:"0.07em"}}>🎨 COLORQUEST</h1><div style={{fontSize:11,color:T.text3,marginTop:3}}>Shared — {projects.length} project{projects.length!==1?"s":""}</div></div></div>
+  <div style={{padding:"12px 15px 40px",maxWidth:680,margin:"0 auto"}}>
+    {onAddToCollection&&<div style={{background:T.green+"14",border:`1px solid ${T.green}35`,borderRadius:8,padding:"10px 13px",marginBottom:14,display:"flex",justifyContent:"space-between",alignItems:"center"}}><span style={{fontSize:12,color:T.green}}>Want to add these to your collection?</span><Btn sm v="ok" onClick={()=>onAddToCollection(projects)}>+ Add to Mine</Btn></div>}
+    {projects.map((p,i)=>{const s=getStats(p);return(<div key={i} onClick={()=>setIdx(i)} style={{background:T.bg1,border:`1px solid ${T.border}`,borderRadius:10,padding:"14px 15px",marginBottom:10,cursor:"pointer"}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}><div><div style={{fontWeight:800,fontSize:15,color:T.text}}>{p.name}</div>{p.faction&&<div style={{fontSize:11,color:T.text3,marginTop:2}}>{p.faction}</div>}</div><div style={{textAlign:"right"}}><div style={{fontWeight:700,color:T.accent,fontSize:22,lineHeight:1}}>{s.total}</div><div style={{fontSize:10,color:T.text3}}>models</div></div></div><Bar stats={s}/><div style={{marginTop:7,fontSize:11,color:T.text3}}>{p.units.length} units · {(p.recipes||[]).length} recipes → tap to view</div></div>)})}
+  </div></div>);
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// MAIN APP
+// ══════════════════════════════════════════════════════════════════════════════
+function App(){
+  const session=useAuth();
+  const [skipLogin,setSkipLogin]=useState(()=>lsLoad("cq-skip-login",false));
+  const [data,setData]=useState(()=>lsLoad(SK_DATA,DEFAULT_DATA));
+  const {paints,addPaint,delPaint,toggleOwned,setPaints}=usePaints();
+  const {log,addEntry,setLog}=usePaintLog();
+  const [syncStatus,setSyncStatus]=useState("idle"); // idle|syncing|synced|error
+  const [cloudLoaded,setCloudLoaded]=useState(false);
+  const [screen,setScreen]=useState("dashboard");
+  const [activePid,setActivePid]=useState(null);
+  const [tab,setTab]=useState("units");
+  const [modal,setModal]=useState(null);
+  const [recipeModal,setRecipeModal]=useState(null);
+  const [paintingRecipe,setPaintingRecipe]=useState(null);
+  const [shareTarget,setShareTarget]=useState(null);
+  const [splitTarget,setSplitTarget]=useState(null);
+  const [editTarget,setEditTarget]=useState(null);
+  const [form,setForm]=useState({});
+  const [filterStatus,setFilter]=useState("all");
+  const [search,setSearch]=useState("");
+  const [toast,setToast]=useState(null);
+  const [showBackupBanner,setShowBackupBanner]=useState(false);
+
+  useEffect(()=>{lsSave(SK_DATA,data)},[data]);
+
+  // Backup reminder: check if 7+ days since last backup
+  useEffect(()=>{
+    const last=lsLoad(SK_BACKUP,null);
+    if(!last)return;
+    const days=(Date.now()-new Date(last).getTime())/(1000*60*60*24);
+    if(days>=7)setShowBackupBanner(true);
+  },[]);
+
+  // ── CLOUD SYNC: on login, pull cloud data (merge if local has more) ──────────
+  useEffect(()=>{
+    if(!session||cloudLoaded)return;
+    (async()=>{
+      setSyncStatus("syncing");
+      const cloud=await cloudLoad();
+      if(cloud){
+        // If cloud has data, prefer it (it's the "source of truth" across devices)
+        if(cloud.projects&&cloud.projects.length>0){setData({projects:cloud.projects})}
+        if(cloud.paints&&cloud.paints.length>0){setPaints(cloud.paints)}
+        if(cloud.log&&cloud.log.length>0){setLog(cloud.log)}
+      } else {
+        // No cloud row yet — push current local data up as the initial cloud copy
+        await cloudSave({projects:data.projects,paints,log});
+      }
+      setCloudLoaded(true);
+      setSyncStatus("synced");
+    })();
+  },[session,cloudLoaded]);
+
+  // ── CLOUD SYNC: debounced push on any change, once initial load is done ──────
+  useEffect(()=>{
+    if(!session||!cloudLoaded)return;
+    setSyncStatus("syncing");
+    const t=setTimeout(async()=>{
+      const ok=await cloudSave({projects:data.projects,paints,log});
+      setSyncStatus(ok?"synced":"error");
+    },1200);
+    return ()=>clearTimeout(t);
+  },[data,paints,log,session,cloudLoaded]);
+
+  const showToast=(msg,color=T.green)=>{setToast({msg,color});setTimeout(()=>setToast(null),2600)};
+  const nid=()=>Date.now()+Math.floor(Math.random()*999);
+  const close=()=>{setModal(null);setForm({});setEditTarget(null)};
+  const sf=(k,v)=>setForm(f=>({...f,[k]:v}));
+  const mut=fn=>setData(d=>({projects:fn(d.projects)}));
+
+  const addProject=()=>{if(!form.name?.trim())return;mut(ps=>[...ps,{id:nid(),name:form.name.trim(),faction:form.faction?.trim()||"",units:[],recipes:[]}]);close()};
+  const saveProject=()=>{mut(ps=>ps.map(p=>p.id===editTarget?{...p,name:form.name?.trim()||p.name,faction:form.faction?.trim()??p.faction}:p));close()};
+  const delProject=id=>{mut(ps=>ps.filter(p=>p.id!==id));setScreen("projects")};
+  const addUnit=()=>{if(!form.name?.trim())return;const u={id:nid(),name:form.name.trim(),models:parseInt(form.models)||1,status:form.status||"new_in_box",notes:form.notes||"",photo:form.photo||null,subgroups:null};mut(ps=>ps.map(p=>p.id===activePid?{...p,units:[...p.units,u]}:p));close()};
+  const saveUnit=()=>{mut(ps=>ps.map(p=>p.id===activePid?{...p,units:p.units.map(u=>u.id===editTarget?{...u,name:form.name?.trim()||u.name,models:parseInt(form.models)||u.models,status:form.status||u.status,notes:form.notes??u.notes,photo:form.photo!==undefined?form.photo:u.photo,subgroups:form.subgroups!==undefined?form.subgroups:u.subgroups}:u)}:p));close()};
+  const delUnit=id=>mut(ps=>ps.map(p=>p.id===activePid?{...p,units:p.units.filter(u=>u.id!==id)}:p));
+
+  const changeUnitStatus=(uid,newStatus)=>{
+    const proj=data.projects.find(p=>p.id===activePid);
+    const unit=proj?.units.find(u=>u.id===uid);
+    if(unit){addEntry(proj.name,unit.name,unit.models,unit.status,newStatus)}
+    mut(ps=>ps.map(p=>p.id===activePid?{...p,units:p.units.map(u=>u.id===uid?{...u,status:newStatus}:u)}:p));
+    showToast(`${unit?.name} → ${SC[newStatus].label}`);
+  };
+
+  const saveRecipe=recipe=>{
+    if(recipeModal?.mode==="add"){const r={...recipe,id:nid()};mut(ps=>ps.map(p=>p.id===activePid?{...p,recipes:[...(p.recipes||[]),r]}:p))}
+    else{mut(ps=>ps.map(p=>p.id===activePid?{...p,recipes:(p.recipes||[]).map(r=>r.id===recipe.id?recipe:r)}:p))}
+    setRecipeModal(null);
+  };
+  const delRecipe=id=>mut(ps=>ps.map(p=>p.id===activePid?{...p,recipes:(p.recipes||[]).filter(r=>r.id!==id)}:p));
+
+  const handleImport=(projects,mode)=>{
+    const rm=projects.map(p=>({...p,id:nid(),units:(p.units||[]).map(u=>({...u,id:nid()})),recipes:(p.recipes||[]).map(r=>({...r,id:nid()}))}));
+    if(mode==="replace"){setData({projects:rm})}else{mut(ps=>[...ps,...rm])}
+    showToast(`✓ Imported ${projects.length} project${projects.length!==1?"s":""}`);
+  };
+
+  function doBackup(){exportAll(data);lsSave(SK_BACKUP,new Date().toISOString());setShowBackupBanner(false);showToast("✓ Backup saved")}
+
+  const project=data.projects.find(p=>p.id===activePid);
+  const filteredUnits=project?.units.filter(u=>(filterStatus==="all"||u.status===filterStatus)&&(!search||u.name.toLowerCase().includes(search.toLowerCase())||(u.notes||"").toLowerCase().includes(search.toLowerCase())))||[];
+  const shownProjects=data.projects.filter(p=>!search||p.name.toLowerCase().includes(search.toLowerCase())||(p.faction||"").toLowerCase().includes(search.toLowerCase())||p.units.some(u=>u.name.toLowerCase().includes(search.toLowerCase())));
+  const goToProject=pid=>{setActivePid(pid);setScreen("detail");setSearch("");setTab("units")};
+
+  // Auth gate: show login unless signed in or explicitly skipped
+  if(session===undefined)return(<div style={{minHeight:"100dvh",background:T.bg0,display:"flex",alignItems:"center",justifyContent:"center"}}><div style={{color:T.accent,fontFamily:"monospace",fontSize:13,letterSpacing:"0.15em"}}>LOADING…</div></div>);
+  if(!session&&!skipLogin)return<LoginScreen onSkip={()=>{lsSave("cq-skip-login",true);setSkipLogin(true)}}/>;
+
+  if(screen==="paints")return<PaintLibrary paints={paints} addPaint={addPaint} delPaint={delPaint} toggleOwned={toggleOwned} onClose={()=>setScreen("projects")}/>;
+  if(screen==="account")return<AccountScreen session={session} syncStatus={syncStatus} onClose={()=>setScreen("projects")}/>;
+
+  const hdrTitle=screen==="detail"&&project?project.name:"🎨 COLORQUEST";
+  const hdrSub=screen==="detail"&&project?(project.faction||"Project"):null;
+
+  return(<div style={{minHeight:"100dvh",background:T.bg0,color:T.text,fontFamily:"'Courier New','Lucida Console',monospace",display:"flex",flexDirection:"column"}}>
+
+    {toast&&<div style={{position:"fixed",top:"calc(16px + env(safe-area-inset-top))",left:"50%",transform:"translateX(-50%)",background:T.bg1,border:`1px solid ${toast.color}50`,borderRadius:8,padding:"10px 18px",fontSize:13,fontWeight:700,color:toast.color,zIndex:999,boxShadow:"0 8px 32px rgba(0,0,0,0.15)",whiteSpace:"nowrap",pointerEvents:"none"}}>{toast.msg}</div>}
+
+    {/* Header */}
+    <div style={{borderBottom:`1px solid ${T.border}`,padding:`calc(14px + env(safe-area-inset-top)) 15px 13px`,display:"flex",alignItems:"center",gap:10,background:T.bg0,flexShrink:0,position:"sticky",top:0,zIndex:50}}>
+      {screen==="detail"&&<button onClick={()=>{setScreen("projects");setActivePid(null);setFilter("all");setSearch("")}} style={{background:"none",border:"none",color:T.text2,cursor:"pointer",fontSize:22,width:36,height:36,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>}
+      <div style={{flex:1,minWidth:0}}>
+        {hdrSub&&<div style={{fontSize:10,color:T.text3,letterSpacing:"0.15em",textTransform:"uppercase"}}>{hdrSub}</div>}
+        <h1 style={{margin:0,fontSize:16,fontWeight:900,color:T.accent,letterSpacing:"0.07em",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{hdrTitle}</h1>
+      </div>
+      <div style={{display:"flex",gap:5,flexShrink:0,alignItems:"center",flexWrap:"wrap",justifyContent:"flex-end"}}>
+        {session&&<button onClick={()=>setScreen("account")} title="Account & Sync" style={{background:"none",border:"none",cursor:"pointer",fontSize:16,padding:"4px 6px",display:"flex",alignItems:"center",gap:4}}><span style={{width:8,height:8,borderRadius:"50%",background:syncStatus==="synced"?T.green:syncStatus==="syncing"?T.blue:syncStatus==="error"?T.red:T.text3,display:"inline-block"}}/>👤</button>}
+        {(screen==="dashboard"||screen==="projects")&&<Btn sm v="ok" onClick={()=>exportCSV(data)}>↓ CSV</Btn>}
+        {screen==="projects"&&<><Btn sm v="blue" onClick={()=>setModal("import")}>↑ Import</Btn><Btn sm v="ok" onClick={doBackup}>↓ All</Btn><Btn sm onClick={()=>{setModal("addProject");setForm({})}}>+ Project</Btn></>}
+        {screen==="detail"&&project&&<>
+          <Btn sm v="orange" onClick={()=>setShareTarget(project)}>🔗 Share</Btn>
+          <Btn sm v="ok" onClick={()=>{exportProject(project);showToast("✓ Exported")}}>↓ Export</Btn>
+          <Btn sm v="sec" onClick={()=>{setForm({name:project.name,faction:project.faction});setEditTarget(activePid);setModal("editProject")}}>Edit</Btn>
+          {tab==="units"&&<Btn sm onClick={()=>{setModal("addUnit");setForm({status:"new_in_box",models:"1"})}}>+ Unit</Btn>}
+          {tab==="recipes"&&<Btn sm onClick={()=>setRecipeModal({recipe:null,mode:"add"})}>+ Recipe</Btn>}
+        </>}
+      </div>
+    </div>
+
+    {/* Backup banner */}
+    {showBackupBanner&&screen!=="detail"&&<BackupBanner onExport={doBackup} onDismiss={()=>setShowBackupBanner(false)}/>}
+
+    {/* Search */}
+    {(screen==="projects"||screen==="detail")&&<div style={{padding:"10px 15px 0",maxWidth:680,margin:"0 auto",width:"100%",flexShrink:0}}><div style={{position:"relative"}}><span style={{position:"absolute",left:11,top:"50%",transform:"translateY(-50%)",color:T.text3,fontSize:13}}>🔍</span><input value={search} onChange={e=>setSearch(e.target.value)} placeholder={screen==="projects"?"Search projects, factions, units…":"Search units or notes…"} style={{...IS,paddingLeft:32}}/>{search&&<button onClick={()=>setSearch("")} style={{position:"absolute",right:8,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",color:T.text3,cursor:"pointer",fontSize:18}}>×</button>}</div></div>}
+
+    {/* Content */}
+    <div style={{flex:1,overflowY:"auto"}}>
+      {screen==="dashboard"&&<Dashboard data={data} log={log} onGoToProject={goToProject}/>}
+
+      {screen==="projects"&&<div style={{padding:"12px 15px",maxWidth:680,margin:"0 auto",paddingBottom:"calc(80px + env(safe-area-inset-bottom))"}}>
+        {(()=>{const g={painted:0,built:0,unpainted:0,new_in_box:0,total:0};data.projects.forEach(p=>{const s=getStats(p);Object.keys(g).forEach(k=>g[k]+=s[k])});return(<div style={{background:T.bg1,border:`1px solid ${T.border}`,borderRadius:10,padding:"12px 14px",marginBottom:14,marginTop:6}}><div style={{fontSize:10,color:T.text3,letterSpacing:"0.12em",textTransform:"uppercase",marginBottom:7,fontWeight:700}}>Collection — {g.total} models · {data.projects.length} project{data.projects.length!==1?"s":""}</div><Bar stats={g}/><div style={{display:"flex",gap:12,flexWrap:"wrap",marginTop:7}}>{Object.entries(SC).map(([k,c])=><div key={k} style={{fontSize:11}}><span style={{color:T.text3}}>{c.label} </span><span style={{color:c.color,fontWeight:700}}>{g[k]}</span></div>)}</div></div>)})()}
+        {shownProjects.length===0&&<div style={{textAlign:"center",color:T.text3,padding:"50px 0",fontSize:14}}>{search?"No projects match.":"No projects yet!"}</div>}
+        {shownProjects.map(p=>{const s=getStats(p);return(<div key={p.id} onClick={()=>goToProject(p.id)} style={{background:T.bg1,border:`1px solid ${T.border}`,borderRadius:10,padding:"14px 15px",marginBottom:10,cursor:"pointer",WebkitTapHighlightColor:"transparent"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}><div><div style={{fontWeight:800,fontSize:15,color:T.text}}>{p.name}</div>{p.faction&&<div style={{fontSize:11,color:T.text3,marginTop:2}}>{p.faction}</div>}</div><div style={{textAlign:"right"}}><div style={{fontWeight:700,color:T.accent,fontSize:22,lineHeight:1}}>{s.total}</div><div style={{fontSize:10,color:T.text3}}>models</div></div></div>
+          <Bar stats={s}/><div style={{display:"flex",gap:9,flexWrap:"wrap",marginTop:5}}>{Object.entries(SC).map(([k,c])=>s[k]>0&&<span key={k} style={{fontSize:11,color:c.color}}>{c.icon} {s[k]} {c.label}</span>)}</div>
+          <div style={{marginTop:7,fontSize:11,color:T.text3}}>{p.units.length} unit{p.units.length!==1?"s":""} · {(p.recipes||[]).length} recipe{(p.recipes||[]).length!==1?"s":""} → tap to open</div>
+        </div>)})}
+      </div>}
+
+      {screen==="detail"&&project&&<div style={{padding:"12px 15px",maxWidth:680,margin:"0 auto",paddingBottom:"calc(80px + env(safe-area-inset-bottom))"}}>
+        {(()=>{const s=getStats(project);return(<div style={{background:T.bg1,border:`1px solid ${T.border}`,borderRadius:10,padding:"12px 14px",marginBottom:13,marginTop:6}}><div style={{fontSize:10,color:T.text3,letterSpacing:"0.12em",textTransform:"uppercase",marginBottom:5,fontWeight:700}}>{s.total} models · {project.units.length} units · {(project.recipes||[]).length} recipes</div><Bar stats={s}/><div style={{display:"flex",gap:12,flexWrap:"wrap",marginTop:6}}>{Object.entries(SC).map(([k,c])=><div key={k} style={{fontSize:11}}><span style={{color:T.text3}}>{c.label} </span><span style={{color:c.color,fontWeight:700}}>{s[k]}</span></div>)}</div></div>)})()}
+        <TabBar tabs={[{id:"units",label:`Units (${project.units.length})`},{id:"recipes",label:`Recipes (${(project.recipes||[]).length})`},{id:"showcase",label:"Showcase"}]} active={tab} onChange={setTab}/>
+
+        {tab==="units"&&<>
+          <div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:12}}>{[["all","All"],...Object.entries(SC).map(([k,v])=>[k,v.label])].map(([k,label])=>(<button key={k} onClick={()=>setFilter(k)} style={{background:filterStatus===k?T.accentDim:"transparent",border:`1px solid ${filterStatus===k?T.accent:T.border}`,borderRadius:20,padding:"4px 11px",cursor:"pointer",color:filterStatus===k?T.accent:T.text3,fontSize:11,fontWeight:700,letterSpacing:"0.04em",textTransform:"uppercase",fontFamily:"inherit"}}>{label}</button>))}</div>
+          <div style={{fontSize:11,color:T.text3,marginBottom:10,paddingLeft:2}}>Tap a status badge to cycle · Hold to split unit</div>
+          {filteredUnits.length===0&&<div style={{textAlign:"center",color:T.text3,padding:"40px 0",fontSize:14}}>{project.units.length===0?"No units yet.":"No units match."}</div>}
+          {filteredUnits.map(u=><UnitCard key={u.id} unit={u} onEdit={u=>{setEditTarget(u.id);setForm({name:u.name,models:String(u.models),status:u.status,notes:u.notes||"",photo:u.photo||null,subgroups:u.subgroups});setModal("editUnit")}} onDelete={delUnit} onStatusChange={changeUnitStatus} onSplit={u=>setSplitTarget(u)}/>)}
+        </>}
+
+        {tab==="recipes"&&<>
+          {(project.recipes||[]).length===0&&<div style={{textAlign:"center",color:T.text3,padding:"40px 0",fontSize:14}}>No paint recipes yet.<br/>Tap + Recipe to add your first.</div>}
+          {(project.recipes||[]).map(r=><RecipeCard key={r.id} recipe={r} onEdit={r=>setRecipeModal({recipe:r,mode:"edit"})} onDelete={delRecipe} onStartPainting={r=>setPaintingRecipe(r)}/>)}
+        </>}
+
+        {tab==="showcase"&&<>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+            {project.units.filter(u=>u.photo).map(u=>(<div key={u.id} style={{borderRadius:10,overflow:"hidden",position:"relative",border:`1px solid ${T.border}`}}><img src={u.photo} alt={u.name} style={{width:"100%",aspectRatio:"1",objectFit:"cover",display:"block"}}/><div style={{position:"absolute",bottom:0,left:0,right:0,background:"linear-gradient(transparent,rgba(0,0,0,0.75))",padding:"24px 10px 8px"}}><div style={{fontSize:12,fontWeight:800,color:"#fff"}}>{u.name}</div><div style={{marginTop:3}}><Badge status={u.status}/></div></div></div>))}
+          </div>
+          {project.units.filter(u=>u.photo).length===0&&<div style={{textAlign:"center",color:T.text3,padding:"50px 0",fontSize:13}}>No photos yet — add photos to units to see them here.</div>}
+        </>}
+
+        <div style={{marginTop:28,borderTop:`1px solid ${T.border}`,paddingTop:14}}><Btn v="del" sm onClick={()=>{if(window.confirm("Delete this project and all its data?"))delProject(project.id)}}>🗑 Delete Project</Btn></div>
+      </div>}
+    </div>
+
+    {/* Bottom Nav */}
+    <div style={{position:"fixed",bottom:0,left:0,right:0,background:T.bg0,borderTop:`1px solid ${T.border}`,display:"flex",zIndex:100,paddingBottom:"env(safe-area-inset-bottom)"}}>
+      {[{id:"dashboard",icon:"📊",label:"Dashboard"},{id:"projects",icon:"⚔️",label:"Projects"},{id:"paints",icon:"🎨",label:"Paints"}].map(({id,icon,label})=>{
+        const active=screen===id||(screen==="detail"&&id==="projects");
+        return(<button key={id} onClick={()=>{if(id==="projects"&&screen==="detail"){setScreen("projects");setActivePid(null);setFilter("all");setSearch("")}else{setScreen(id)}}} style={{flex:1,padding:"10px 8px 9px",background:"none",border:"none",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:3,WebkitTapHighlightColor:"transparent",opacity:active?1:0.45}}>
+          <span style={{fontSize:19}}>{icon}</span>
+          <span style={{fontSize:9,fontWeight:700,letterSpacing:"0.06em",textTransform:"uppercase",color:active?T.accent:T.text3,fontFamily:"inherit"}}>{label}</span>
+          {active&&<div style={{width:18,height:2,borderRadius:1,background:T.accent,marginTop:1}}/>}
+        </button>);
+      })}
+    </div>
+
+    {/* Modals & Overlays */}
+    {paintingRecipe&&<PaintingMode recipe={paintingRecipe} onClose={()=>setPaintingRecipe(null)} paints={paints}/>}
+    {shareTarget&&<ShareModal project={shareTarget} onClose={()=>setShareTarget(null)}/>}
+    {splitTarget&&<SplitModal unit={splitTarget} onSave={u=>{setEditTarget(u.id);mut(ps=>ps.map(p=>p.id===activePid?{...p,units:p.units.map(x=>x.id===u.id?u:x)}:p))}} onClose={()=>setSplitTarget(null)}/>}
+    {modal==="import"&&<ImportModal onClose={close} onImport={handleImport}/>}
+    {modal==="addProject"&&<Modal title="New Project" onClose={close}><Inp label="Project Name" placeholder="e.g. Orks Waaagh!" value={form.name||""} onChange={e=>sf("name",e.target.value)} autoFocus/><Inp label="Faction / Army" placeholder="e.g. Orks, Space Marines…" value={form.faction||""} onChange={e=>sf("faction",e.target.value)}/><div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:4}}><Btn v="sec" sm onClick={close}>Cancel</Btn><Btn sm onClick={addProject}>Create</Btn></div></Modal>}
+    {modal==="editProject"&&<Modal title="Edit Project" onClose={close}><Inp label="Project Name" value={form.name||""} onChange={e=>sf("name",e.target.value)} autoFocus/><Inp label="Faction / Army" value={form.faction||""} onChange={e=>sf("faction",e.target.value)}/><div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:4}}><Btn v="sec" sm onClick={close}>Cancel</Btn><Btn sm onClick={saveProject}>Save</Btn></div></Modal>}
+    {(modal==="addUnit"||modal==="editUnit")&&<Modal title={modal==="addUnit"?"Add Unit":"Edit Unit"} onClose={close} wide><Inp label="Unit Name" placeholder="e.g. Boyz Squad, Terminators…" value={form.name||""} onChange={e=>sf("name",e.target.value)} autoFocus/><Inp label="Number of Models" type="number" min="1" value={form.models||"1"} onChange={e=>sf("models",e.target.value)}/><Sel label="Status" value={form.status||"new_in_box"} onChange={e=>sf("status",e.target.value)}>{Object.entries(SC).map(([k,v])=><option key={k} value={k}>{v.icon} {v.label}</option>)}</Sel><Txt label="Notes" placeholder="Assembly notes, colour cues, WIP ideas…" value={form.notes||""} onChange={e=>sf("notes",e.target.value)}/><PhotoUpload value={form.photo||null} onChange={v=>sf("photo",v)}/><div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:6}}><Btn v="sec" sm onClick={close}>Cancel</Btn><Btn sm onClick={modal==="addUnit"?addUnit:saveUnit}>{modal==="addUnit"?"Add Unit":"Save"}</Btn></div></Modal>}
+    {recipeModal&&<RecipeModal recipe={recipeModal.recipe} onSave={saveRecipe} onClose={()=>setRecipeModal(null)} paints={paints} addPaint={addPaint}/>}
+  </div>);
+}
+
+function Root(){
+  const hash=window.location.hash;
+  if(hash.startsWith("#share=")){const p=decodeShare(hash);if(p)return<SharedView projects={p} onAddToCollection={null}/>}
+  return<App/>;
+}
+ReactDOM.createRoot(document.getElementById("root")).render(<Root/>);
+</script>
+</body>
+</html>
