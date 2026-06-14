@@ -49,16 +49,16 @@ const T={
 };
 
 // ── Storage ───────────────────────────────────────────────────────────────────
-const SK_DATA="cq-data-v4",SK_PAINTS="cq-paints-v1",SK_LOG="cq-log-v1",SK_BACKUP="cq-lastbackup-v1",SK_HOBBY="cq-hobby-pick-v1";
+const SK_DATA="cq-data-v4",SK_PAINTS="cq-paints-v1",SK_LOG="cq-log-v1",SK_BACKUP="cq-lastbackup-v1",SK_HOBBY="cq-hobby-pick-v1",SK_FOLLOWING="cq-following-v1";
 const lsLoad=(k,d)=>{try{const r=localStorage.getItem(k);return r?JSON.parse(r):d}catch{return d}};
 const lsSave=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch{}};
 
 const DEFAULT_DATA={projects:[
   {id:1,name:"Orks Waaagh!",faction:"Orks",units:[
-    {id:1,name:"Boyz Squad",models:20,status:"painted",notes:"Green skin, red eyes.",photo:null,subgroups:null},
-    {id:2,name:"Nobz",models:5,status:"built",notes:"",photo:null,subgroups:null},
-    {id:3,name:"Warboss",models:1,status:"unpainted",notes:"Check GW NMM tutorial.",photo:null,subgroups:null},
-    {id:4,name:"Trukk",models:1,status:"new_in_box",notes:"",photo:null,subgroups:null},
+    {id:1,name:"Boyz Squad",models:20,status:"painted",notes:"Green skin, red eyes.",photos:{before:null,wip:null,after:null},subgroups:null},
+    {id:2,name:"Nobz",models:5,status:"built",notes:"",photos:{before:null,wip:null,after:null},subgroups:null},
+    {id:3,name:"Warboss",models:1,status:"unpainted",notes:"Check GW NMM tutorial.",photos:{before:null,wip:null,after:null},subgroups:null},
+    {id:4,name:"Trukk",models:1,status:"new_in_box",notes:"",photos:{before:null,wip:null,after:null},subgroups:null},
   ],recipes:[
     {id:101,name:"Skin",steps:[
       {phase:"Base",paint:"Waaagh! Flesh",brand:"Citadel",type:"Base",notes:""},
@@ -73,9 +73,9 @@ const DEFAULT_DATA={projects:[
     ]},
   ]},
   {id:2,name:"Space Marine Strike Force",faction:"Space Marines",units:[
-    {id:5,name:"Tactical Squad",models:10,status:"painted",notes:"Ultramarines blue.",photo:null,subgroups:null},
-    {id:6,name:"Terminators",models:5,status:"built",notes:"",photo:null,subgroups:null},
-    {id:7,name:"Land Raider",models:1,status:"new_in_box",notes:"",photo:null,subgroups:null},
+    {id:5,name:"Tactical Squad",models:10,status:"painted",notes:"Ultramarines blue.",photos:{before:null,wip:null,after:null},subgroups:null},
+    {id:6,name:"Terminators",models:5,status:"built",notes:"",photos:{before:null,wip:null,after:null},subgroups:null},
+    {id:7,name:"Land Raider",models:1,status:"new_in_box",notes:"",photos:{before:null,wip:null,after:null},subgroups:null},
   ],recipes:[
     {id:201,name:"Armour",steps:[
       {phase:"Base",paint:"Macragge Blue",brand:"Citadel",type:"Base",notes:""},
@@ -111,7 +111,7 @@ const DEFAULT_PAINTS=[
 ];
 
 // ── Share helpers ─────────────────────────────────────────────────────────────
-function encodeShare(projects){try{const s=projects.map(p=>({...p,units:p.units.map(u=>({...u,photo:null}))}));return btoa(unescape(encodeURIComponent(JSON.stringify({_mrp:1,projects:s}))))}catch{return null}}
+function encodeShare(projects){try{return btoa(unescape(encodeURIComponent(JSON.stringify({_mrp:1,projects}))))}catch{return null}}
 function decodeShare(hash){try{const b64=hash.replace(/^#share=/,"");const p=JSON.parse(decodeURIComponent(escape(atob(b64))));return p._mrp&&p.projects?p.projects:null}catch{return null}}
 function buildShareUrl(projects){const e=encodeShare(projects);return e?window.location.href.split("#")[0]+"#share="+e:null}
 
@@ -265,7 +265,30 @@ function useAuth(){
     setSession(null);
   },[]);
 
+  // Check token expiry every 30s; flip session to null so app can prompt re-auth
+  useEffect(()=>{
+    const t=setInterval(()=>{
+      const stored=lsLoad(TOKEN_KEY,null);
+      if(stored&&stored.expiresAt&&stored.expiresAt<Date.now()){
+        lsSave(TOKEN_KEY,null);
+        setSession(null);
+      }
+    },30000);
+    return()=>clearInterval(t);
+  },[]);
+
   return{session,signIn,signOut};
+}
+
+// Token-expired banner shown inline when session lapses mid-use
+function SessionExpiredBanner({onSignIn}){
+  return(<div style={{background:T.yellow+"18",border:`1px solid ${T.yellow}40`,borderRadius:12,padding:"12px 16px",margin:"10px 15px",display:"flex",justifyContent:"space-between",alignItems:"center",gap:12}}>
+    <div>
+      <div style={{fontSize:13,fontWeight:700,color:T.yellow}}>⏱ Session expired</div>
+      <div style={{fontSize:12,color:T.text3,marginTop:2}}>Tap to sign in again — your data is safe.</div>
+    </div>
+    <button onClick={onSignIn} style={{background:T.accent,color:"#fff",border:"none",borderRadius:10,padding:"8px 14px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>Sign in</button>
+  </div>);
 }
 
 // ── LOGIN SCREEN ──────────────────────────────────────────────────────────────
@@ -373,10 +396,45 @@ function Modal({title,onClose,children,wide,fullscreen}){return(<div style={{pos
 function TabBar({tabs,active,onChange}){return(<div style={{display:"flex",gap:3,background:T.bg2,borderRadius:14,padding:3,marginBottom:14,border:`1px solid ${T.border}`}}>{tabs.map(t=><button key={t.id} onClick={()=>onChange(t.id)} style={{flex:1,padding:"8px 6px",borderRadius:10,border:"none",cursor:"pointer",fontWeight:700,fontSize:14,fontFamily:"'Inter','SF Pro Display',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif",letterSpacing:"0.02em",textTransform:"uppercase",transition:"all 0.15s",background:active===t.id?T.accentDim:"transparent",color:active===t.id?T.accent:T.text3,borderBottom:active===t.id?`2px solid ${T.accent}`:"2px solid transparent"}}>{t.label}</button>)}</div>)}
 
 let _pc=0;
-function PhotoUpload({value,onChange}){
-  const [uid]=useState(()=>"pu-"+(++_pc));
-  return(<Field label="Photo (optional)"><div style={{display:"flex",gap:12,alignItems:"flex-start"}}>{value&&<div style={{position:"relative",flexShrink:0}}><img src={value} alt="" style={{width:72,height:72,objectFit:"cover",borderRadius:14,border:`1px solid ${T.border}`,display:"block"}}/><button type="button" onClick={()=>onChange(null)} style={{position:"absolute",top:-7,right:-7,background:T.red,border:`2px solid ${T.bg0}`,borderRadius:"50%",width:20,height:20,cursor:"pointer",color:"#fff",fontSize:14,lineHeight:"16px",padding:0,fontWeight:700}}>×</button></div>}<label htmlFor={uid} style={{width:72,height:72,border:`2px dashed ${T.border2}`,borderRadius:14,background:T.bg2,cursor:"pointer",color:T.text3,fontSize:26,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,userSelect:"none",WebkitUserSelect:"none"}}>{value?"↺":"+"}<input id={uid} type="file" accept="image/*" capture="environment" style={{display:"none",position:"absolute",opacity:0,width:0,height:0}} onChange={async e=>{if(e.target.files?.[0]){const b=await toBase64(e.target.files[0]);onChange(b);e.target.value=""}}}/></label><div style={{fontSize:14,color:T.text3,lineHeight:1.7,paddingTop:4}}>{value?"Tap ↺ to change\n× to remove":"Tap + to upload\nfrom camera"}</div></div></Field>);
+// Single photo slot
+function PhotoSlot({label,value,onChange}){
+  const [uid]=useState(()=>"ps-"+(++_pc));
+  return(
+    <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:6,flex:1}}>
+      <div style={{fontSize:11,fontWeight:700,color:T.text3,letterSpacing:"0.04em",textTransform:"uppercase"}}>{label}</div>
+      <div style={{position:"relative",width:"100%",aspectRatio:"1",borderRadius:12,overflow:"hidden",background:T.bg2,border:`1px solid ${T.border}`}}>
+        {value
+          ?<><img src={value} alt={label} style={{width:"100%",height:"100%",objectFit:"cover",display:"block"}}/>
+              <button type="button" onClick={()=>onChange(null)} style={{position:"absolute",top:4,right:4,background:"rgba(0,0,0,0.6)",border:"none",borderRadius:"50%",width:22,height:22,cursor:"pointer",color:"#fff",fontSize:13,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700}}>×</button>
+            </>
+          :<label htmlFor={uid} style={{width:"100%",height:"100%",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:4,color:T.text3}}>
+              <span style={{fontSize:22}}>📷</span>
+              <span style={{fontSize:11}}>Add {label}</span>
+              <input id={uid} type="file" accept="image/*" capture="environment" style={{display:"none"}} onChange={async e=>{if(e.target.files?.[0]){const b=await toBase64(e.target.files[0]);onChange(b);e.target.value=""}}}/>
+            </label>
+        }
+      </div>
+    </div>
+  );
 }
+function MultiPhotoUpload({photos,onChange}){
+  const ph=photos&&typeof photos==="object"&&!Array.isArray(photos)?photos:{before:null,wip:null,after:null};
+  const upd=(key,val)=>onChange({...ph,[key]:val});
+  return(
+    <Field label="Photos — Before / WIP / After">
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
+        <PhotoSlot label="Before" value={ph.before} onChange={v=>upd("before",v)}/>
+        <PhotoSlot label="WIP"    value={ph.wip}    onChange={v=>upd("wip",v)}/>
+        <PhotoSlot label="After"  value={ph.after}  onChange={v=>upd("after",v)}/>
+      </div>
+      <div style={{fontSize:12,color:T.text3,marginTop:6,lineHeight:1.5}}>Tap a slot to add or replace. Tap × to remove.</div>
+    </Field>
+  );
+}
+function PhotoUpload({value,onChange}){
+  return<MultiPhotoUpload photos={value&&typeof value==="string"?{before:null,wip:null,after:value}:(value||{before:null,wip:null,after:null})} onChange={onChange}/>;
+}
+
 
 // ── Paint hooks ───────────────────────────────────────────────────────────────
 function usePaints(){
@@ -681,6 +739,56 @@ function PaintLibrary({paints,addPaint,delPaint,toggleOwned,onClose}){
 }
 
 // ── Backup reminder banner ────────────────────────────────────────────────────
+// ── Settings ⋯ menu ──────────────────────────────────────────────────────────
+// Shows a ⋯ button. If there's a primaryAction it shows as a filled pill
+// (+Project / +Unit / +Recipe). Secondary actions live in a dropdown sheet.
+function SettingsMenu({items,primaryAction}){
+  const [open,setOpen]=useState(false);
+  const ref=useRef();
+
+  useEffect(()=>{
+    if(!open)return;
+    function handler(e){if(ref.current&&!ref.current.contains(e.target))setOpen(false)}
+    document.addEventListener("mousedown",handler);
+    document.addEventListener("touchstart",handler);
+    return()=>{document.removeEventListener("mousedown",handler);document.removeEventListener("touchstart",handler)}
+  },[open]);
+
+  return(
+    <div style={{display:"flex",alignItems:"center",gap:4}}>
+      {/* Primary CTA pill */}
+      {primaryAction&&(
+        <button onClick={primaryAction.action} style={{background:T.accent,color:"#fff",border:"none",borderRadius:20,padding:"6px 13px",fontSize:13,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap",fontFamily:"inherit"}}>
+          {primaryAction.label}
+        </button>
+      )}
+
+      {/* ⋯ overflow button (only if there are items) */}
+      {items&&items.length>0&&(
+        <div ref={ref} style={{position:"relative"}}>
+          <button onClick={()=>setOpen(o=>!o)} style={{background:open?T.bg2:"none",border:`1px solid ${open?T.border:"transparent"}`,borderRadius:10,width:34,height:34,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",color:T.text2,transition:"background 0.15s"}}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/></svg>
+          </button>
+
+          {open&&(
+            <div style={{position:"absolute",top:"calc(100% + 6px)",right:0,background:T.bg1,border:`1px solid ${T.border}`,borderRadius:14,minWidth:200,boxShadow:"0 8px 24px rgba(0,0,0,0.12)",zIndex:200,overflow:"hidden"}}>
+              {items.map((item,i)=>(
+                <button key={i} onClick={()=>{item.action();setOpen(false)}} style={{width:"100%",background:"none",border:"none",borderBottom:i<items.length-1?`1px solid ${T.border}`:"none",padding:"13px 16px",display:"flex",alignItems:"center",gap:12,cursor:"pointer",textAlign:"left",fontFamily:"inherit",fontSize:14,color:T.text,fontWeight:500}}
+                  onMouseEnter={e=>e.currentTarget.style.background=T.bg2}
+                  onMouseLeave={e=>e.currentTarget.style.background="none"}
+                >
+                  <span style={{fontSize:16,width:22,textAlign:"center",flexShrink:0}}>{item.icon}</span>
+                  {item.label}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function BackupBanner({onExport,onDismiss}){
   return(<div style={{background:T.yellow+"18",border:`1px solid ${T.yellow}40`,borderRadius:14,padding:"10px 13px",margin:"10px 15px 0",maxWidth:680,marginLeft:"auto",marginRight:"auto",display:"flex",justifyContent:"space-between",alignItems:"center",gap:10}}>
     <div>
@@ -746,7 +854,7 @@ function ShareDashboardModal({data,onClose}){
 }
 
 // ── Shared Dashboard (read-only) ──────────────────────────────────────────────
-function SharedDashboard({payload}){
+function SharedDashboard({payload,onBack}){
   const projects=payload.projects||[];
   const [expanded,setExpanded]=useState(null); // index of expanded project row
   const g=useMemo(()=>{const g={painted:0,built:0,unpainted:0,new_in_box:0,total:0};projects.forEach(p=>{Object.keys(g).forEach(k=>g[k]+=p.stats[k]||0)});return g},[projects]);
@@ -759,10 +867,7 @@ function SharedDashboard({payload}){
   const banner=<div style={{background:T.orange+"18",borderBottom:`1px solid ${T.orange}35`,padding:"7px 15px",textAlign:"center",fontSize:14,color:T.orange,fontWeight:700,letterSpacing:"0.02em"}}>👁 READ-ONLY SHARED DASHBOARD</div>;
   return(<div style={{minHeight:"100dvh",background:T.bg0,color:T.text,fontFamily:"'Inter','SF Pro Display',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif"}}>
     {banner}
-    <div style={{borderBottom:`1px solid ${T.border}`,padding:"16px 18px",background:T.bg0}}>
-      <h1 style={{margin:0,fontSize:16,fontWeight:900,color:T.accent,letterSpacing:"0.02em"}}>🎨 TABLETOP READY</h1>
-      <div style={{fontSize:14,color:T.text3,marginTop:3}}>Shared dashboard — {projects.length} project{projects.length!==1?"s":""}</div>
-    </div>
+    <div style={{borderBottom:`1px solid ${T.border}`,padding:"16px 18px",background:T.bg0,display:"flex",alignItems:"center",gap:10}}>{onBack&&<button onClick={onBack} style={{background:"none",border:"none",color:T.text2,cursor:"pointer",fontSize:22,width:36,height:36,display:"flex",alignItems:"center",justifyContent:"center",borderRadius:10,flexShrink:0}}>←</button>}<div><h1 style={{margin:0,fontSize:16,fontWeight:900,color:T.accent,letterSpacing:"0.02em"}}>🎨 TABLETOP READY</h1><div style={{fontSize:14,color:T.text3,marginTop:3}}>Shared dashboard — {projects.length} project{projects.length!==1?"s":""}</div></div></div>
     <div style={{padding:"12px 15px 40px",maxWidth:680,margin:"0 auto"}}>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14,marginTop:6}}>
         {[{label:"Total Models",val:g.total,color:T.accent},{label:"Painted",val:g.painted,color:T.green},{label:"Projects",val:projects.length,color:T.blue},{label:"% Painted",val:pp+"%",color:T.yellow}].map(({label,val,color})=>(
@@ -1000,16 +1105,185 @@ function Dashboard({data,log,onGoToProject}){
   </div>);
 }
 
+// ── Paint Shopping List ───────────────────────────────────────────────────────
+function ShoppingList({data,paints,onClose}){
+  // Aggregate all "not owned" paints referenced in any recipe across all projects
+  const needed=useMemo(()=>{
+    const map={};
+    data.projects.forEach(proj=>{
+      (proj.recipes||[]).forEach(recipe=>{
+        (recipe.steps||[]).forEach(step=>{
+          if(!step.paint)return;
+          const inLib=paints.find(p=>p.name===step.paint&&(!step.brand||p.brand===step.brand));
+          if(inLib&&inLib.owned)return; // already owned
+          const key=`${step.brand||""}|${step.type||""}|${step.paint}`;
+          if(!map[key]){
+            map[key]={name:step.paint,brand:step.brand||"",type:step.type||"",projects:new Set(),recipes:new Set()};
+          }
+          map[key].projects.add(proj.name);
+          map[key].recipes.add(recipe.name);
+        });
+      });
+    });
+    return Object.values(map).map(e=>({...e,projects:[...e.projects],recipes:[...e.recipes]}))
+      .sort((a,b)=>(a.brand+a.name).localeCompare(b.brand+b.name));
+  },[data,paints]);
+
+  // Group by brand
+  const grouped=useMemo(()=>{
+    const g={};
+    needed.forEach(p=>{const k=p.brand||"Unknown Brand";if(!g[k])g[k]=[];g[k].push(p)});
+    return g;
+  },[needed]);
+
+  return(<div style={{minHeight:"100dvh",background:T.bg0,color:T.text,fontFamily:"'Inter','SF Pro Display',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif",display:"flex",flexDirection:"column"}}>
+    <div style={{borderBottom:`1px solid ${T.border}`,padding:`calc(14px + env(safe-area-inset-top)) 15px 13px`,display:"flex",alignItems:"center",gap:10,background:T.bg1,position:"sticky",top:0,zIndex:50}}>
+      <button onClick={onClose} style={{background:"none",border:"none",color:T.text2,cursor:"pointer",fontSize:22,width:36,height:36,display:"flex",alignItems:"center",justifyContent:"center",borderRadius:10}}>←</button>
+      <div style={{flex:1}}>
+        <div style={{fontSize:11,fontWeight:800,color:T.text3,letterSpacing:"0.12em",textTransform:"uppercase"}}>TABLETOP READY</div>
+        <h1 style={{margin:0,fontSize:16,fontWeight:800,color:T.text}}>🛒 Paint Shopping List</h1>
+      </div>
+      <span style={{fontSize:13,color:T.red,fontWeight:700}}>{needed.length} paint{needed.length!==1?"s":""}</span>
+    </div>
+    <div style={{flex:1,overflowY:"auto",padding:"12px 15px 40px",maxWidth:680,margin:"0 auto",width:"100%"}}>
+      {needed.length===0&&<div style={{textAlign:"center",padding:"60px 20px",color:T.text3}}>
+        <div style={{fontSize:36,marginBottom:12}}>🎉</div>
+        <div style={{fontSize:16,fontWeight:700,color:T.green,marginBottom:8}}>You own everything!</div>
+        <div style={{fontSize:14}}>All paints used in your recipes are marked as owned. Add recipes with paints you need to buy to see them here.</div>
+      </div>}
+      {Object.entries(grouped).map(([brand,paints])=>(
+        <div key={brand} style={{marginBottom:16}}>
+          <div style={{fontSize:12,fontWeight:800,color:T.accent,letterSpacing:"0.08em",textTransform:"uppercase",marginBottom:8,padding:"0 2px"}}>{brand}</div>
+          <div style={{background:T.bg1,border:`1px solid ${T.border}`,borderRadius:16,overflow:"hidden"}}>
+            {paints.map((p,i)=>(
+              <div key={i} style={{padding:"12px 16px",borderBottom:i<paints.length-1?`1px solid ${T.border}`:"none"}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:14,fontWeight:700,color:T.text}}>{p.name}</div>
+                    {p.type&&<div style={{fontSize:12,color:T.text3,marginTop:1}}>{p.type}</div>}
+                  </div>
+                  <div style={{fontSize:11,color:T.text3,textAlign:"right",flexShrink:0}}>
+                    {p.projects.slice(0,2).join(", ")}{p.projects.length>2&&` +${p.projects.length-2}`}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  </div>);
+}
+
 // ── Shared viewer ─────────────────────────────────────────────────────────────
-function SharedView({projects,onAddToCollection}){
+function SharedView({projects,onAddToCollection,onBack}){
   const [idx,setIdx]=useState(null);const [tab,setTab]=useState("units");const p=idx!==null?projects[idx]:null;
   const banner=<div style={{background:T.orange+"18",borderBottom:`1px solid ${T.orange}35`,padding:"7px 15px",textAlign:"center",fontSize:14,color:T.orange,fontWeight:700,letterSpacing:"0.02em"}}>👁 READ-ONLY SHARED VIEW</div>;
-  if(p){const s=getStats(p);return(<div style={{minHeight:"100dvh",background:T.bg0,color:T.text,fontFamily:"'Inter','SF Pro Display',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif"}}>{banner}<div style={{borderBottom:`1px solid ${T.border}`,padding:"12px 15px",display:"flex",alignItems:"center",gap:10,background:T.bg0,position:"sticky",top:0,zIndex:50}}><button onClick={()=>{setIdx(null);setTab("units")}} style={{background:"none",border:"none",color:T.text2,cursor:"pointer",fontSize:22,width:36,height:36,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button><div style={{flex:1,minWidth:0}}>{p.faction&&<div style={{fontSize:14,color:T.text3,letterSpacing:"0.03em",textTransform:"uppercase"}}>{p.faction}</div>}<h1 style={{margin:0,fontSize:16,fontWeight:900,color:T.accent,letterSpacing:"0.02em",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{p.name}</h1></div></div><div style={{padding:"12px 15px 40px",maxWidth:680,margin:"0 auto"}}><div style={{background:T.bg1,border:`1px solid ${T.border}`,borderRadius:16,padding:"14px 17px",marginBottom:13,marginTop:6}}><div style={{fontSize:14,color:T.text3,letterSpacing:"0.03em",textTransform:"uppercase",marginBottom:5,fontWeight:700}}>{s.total} models · {p.units.length} units · {(p.recipes||[]).length} recipes</div><Bar stats={s}/><div style={{display:"flex",gap:12,flexWrap:"wrap",marginTop:6}}>{Object.entries(SC).map(([k,c])=><div key={k} style={{fontSize:13,background:c.bg,color:c.color,fontWeight:700,borderRadius:20,padding:"4px 11px",display:"flex",alignItems:"center",gap:6}}><span style={{fontSize:14}}>{c.icon}</span>{s[k]}</div>)}</div></div><TabBar tabs={[{id:"units",label:`Units (${p.units.length})`},{id:"recipes",label:`Recipes (${(p.recipes||[]).length})`},{id:"showcase",label:"Showcase"}]} active={tab} onChange={setTab}/>{tab==="units"&&p.units.map(u=>(<div key={u.id} style={{background:T.bg1,border:`1px solid ${T.border}`,borderRadius:16,padding:"15px 17px",marginBottom:9}}><div style={{display:"flex",gap:10,alignItems:"flex-start"}}>{u.photo&&<img src={u.photo} alt="" style={{width:60,height:60,objectFit:"cover",borderRadius:14,border:`1px solid ${T.border}`,flexShrink:0}}/>}<div style={{flex:1,minWidth:0}}><div style={{fontWeight:800,fontSize:14,color:T.text,marginBottom:5}}>{u.name}</div><div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}><Badge status={u.status}/><span style={{fontSize:14,color:T.text2}}><span style={{color:T.accent,fontWeight:700}}>{u.models}</span> model{u.models!==1?"s":""}</span></div>{u.notes&&<div style={{marginTop:7,fontSize:14,color:T.text2,lineHeight:1.55,borderLeft:`2px solid ${T.border}`,paddingLeft:8,whiteSpace:"pre-wrap"}}>{u.notes}</div>}</div></div></div>))}{tab==="recipes"&&(p.recipes||[]).map(r=><RecipeCard key={r.id} recipe={r} readOnly onEdit={()=>{}} onDelete={()=>{}} onStartPainting={()=>{}}/>)}{tab==="showcase"&&(<div><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>{p.units.filter(u=>u.photo).map(u=>(<div key={u.id} style={{borderRadius:14,overflow:"hidden",position:"relative"}}><img src={u.photo} alt={u.name} style={{width:"100%",aspectRatio:"1",objectFit:"cover",display:"block"}}/><div style={{position:"absolute",bottom:0,left:0,right:0,background:"linear-gradient(transparent,rgba(0,0,0,0.7)",padding:"20px 8px 6px"}}><div style={{fontSize:14,fontWeight:700,color:"#fff"}}>{u.name}</div><div style={{marginTop:2}}><Badge status={u.status}/></div></div></div>))}</div>{p.units.filter(u=>u.photo).length===0&&<div style={{textAlign:"center",color:T.text3,padding:"40px 0",fontSize:14}}>No photos in this project.</div>}</div>)}</div></div>);}
-  return(<div style={{minHeight:"100dvh",background:T.bg0,color:T.text,fontFamily:"'Inter','SF Pro Display',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif"}}>{banner}<div style={{borderBottom:`1px solid ${T.border}`,padding:"16px 18px",background:T.bg0,display:"flex",justifyContent:"space-between",alignItems:"center"}}><div><h1 style={{margin:0,fontSize:16,fontWeight:900,color:T.accent,letterSpacing:"0.02em"}}>🎨 TABLETOP READY</h1><div style={{fontSize:14,color:T.text3,marginTop:3}}>Shared — {projects.length} project{projects.length!==1?"s":""}</div></div></div>
+  if(p){const s=getStats(p);return(<div style={{minHeight:"100dvh",background:T.bg0,color:T.text,fontFamily:"'Inter','SF Pro Display',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif"}}>{banner}<div style={{borderBottom:`1px solid ${T.border}`,padding:"12px 15px",display:"flex",alignItems:"center",gap:10,background:T.bg0,position:"sticky",top:0,zIndex:50}}><button onClick={()=>{setIdx(null);setTab("units")}} style={{background:"none",border:"none",color:T.text2,cursor:"pointer",fontSize:22,width:36,height:36,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button><div style={{flex:1,minWidth:0}}>{p.faction&&<div style={{fontSize:14,color:T.text3,letterSpacing:"0.03em",textTransform:"uppercase"}}>{p.faction}</div>}<h1 style={{margin:0,fontSize:16,fontWeight:900,color:T.accent,letterSpacing:"0.02em",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{p.name}</h1></div></div><div style={{padding:"12px 15px 40px",maxWidth:680,margin:"0 auto"}}><div style={{background:T.bg1,border:`1px solid ${T.border}`,borderRadius:16,padding:"14px 17px",marginBottom:13,marginTop:6}}><div style={{fontSize:14,color:T.text3,letterSpacing:"0.03em",textTransform:"uppercase",marginBottom:5,fontWeight:700}}>{s.total} models · {p.units.length} units · {(p.recipes||[]).length} recipes</div><Bar stats={s}/><div style={{display:"flex",gap:12,flexWrap:"wrap",marginTop:6}}>{Object.entries(SC).map(([k,c])=><div key={k} style={{fontSize:13,background:c.bg,color:c.color,fontWeight:700,borderRadius:20,padding:"4px 11px",display:"flex",alignItems:"center",gap:6}}><span style={{fontSize:14}}>{c.icon}</span>{s[k]}</div>)}</div></div><TabBar tabs={[{id:"units",label:`Units (${p.units.length})`},{id:"recipes",label:`Recipes (${(p.recipes||[]).length})`},{id:"showcase",label:"Showcase"}]} active={tab} onChange={setTab}/>{tab==="units"&&p.units.map(u=>(<div key={u.id} style={{background:T.bg1,border:`1px solid ${T.border}`,borderRadius:16,padding:"15px 17px",marginBottom:9}}><div style={{display:"flex",gap:10,alignItems:"flex-start"}}>{(()=>{const ph=u.photos&&typeof u.photos==="object"?u.photos:u.photo?{before:null,wip:null,after:u.photo}:{};const shots=[{key:"before",label:"Before",v:ph.before},{key:"wip",label:"WIP",v:ph.wip},{key:"after",label:"After",v:ph.after}].filter(s=>s.v);return shots.length>0&&<div style={{display:"flex",gap:4,marginBottom:8}}>{shots.map(s=><div key={s.key} style={{position:"relative",flexShrink:0}}><img src={s.v} alt={s.label} style={{width:54,height:54,objectFit:"cover",borderRadius:10,border:`1px solid ${T.border}`,display:"block"}}/><div style={{position:"absolute",bottom:2,left:2,background:"rgba(0,0,0,0.55)",borderRadius:3,padding:"1px 4px",fontSize:9,color:"#fff",fontWeight:700}}>{s.label}</div></div>)}</div>})()}<div style={{flex:1,minWidth:0}}><div style={{fontWeight:800,fontSize:14,color:T.text,marginBottom:5}}>{u.name}</div><div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}><Badge status={u.status}/><span style={{fontSize:14,color:T.text2}}><span style={{color:T.accent,fontWeight:700}}>{u.models}</span> model{u.models!==1?"s":""}</span></div>{u.notes&&<div style={{marginTop:7,fontSize:14,color:T.text2,lineHeight:1.55,borderLeft:`2px solid ${T.border}`,paddingLeft:8,whiteSpace:"pre-wrap"}}>{u.notes}</div>}</div></div></div>))}{tab==="recipes"&&(p.recipes||[]).map(r=><RecipeCard key={r.id} recipe={r} readOnly onEdit={()=>{}} onDelete={()=>{}} onStartPainting={()=>{}}/>)}{tab==="showcase"&&(<div><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>{p.units.filter(u=>{const ph=u.photos&&typeof u.photos==="object"?u.photos:{};return ph.before||ph.wip||ph.after||u.photo}).flatMap(u=>{const ph=u.photos&&typeof u.photos==="object"?u.photos:u.photo?{after:u.photo}:{};return[{img:ph.after,lbl:"After",u},{img:ph.wip,lbl:"WIP",u},{img:ph.before,lbl:"Before",u}].filter(s=>s.img)}).map(({img,lbl,u},i)=>(<div key={i} style={{borderRadius:14,overflow:"hidden",position:"relative"}}><img src={img} alt={u.name} style={{width:"100%",aspectRatio:"1",objectFit:"cover",display:"block"}}/><div style={{position:"absolute",bottom:0,left:0,right:0,background:"linear-gradient(transparent,rgba(0,0,0,0.7))",padding:"20px 8px 6px"}}><div style={{fontSize:13,fontWeight:700,color:"#fff"}}>{u.name}</div><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:2}}><Badge status={u.status}/><span style={{fontSize:10,color:"rgba(255,255,255,0.7)",background:"rgba(0,0,0,0.4)",borderRadius:3,padding:"1px 5px"}}>{lbl}</span></div></div></div>))}</div>{p.units.filter(u=>{const ph=u.photos&&typeof u.photos==="object"?u.photos:{};return ph.before||ph.wip||ph.after||u.photo}).length===0&&<div style={{textAlign:"center",color:T.text3,padding:"40px 0",fontSize:14}}>No photos in this project.</div>}</div>)}</div></div>);}
+  return(<div style={{minHeight:"100dvh",background:T.bg0,color:T.text,fontFamily:"'Inter','SF Pro Display',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif"}}>{banner}<div style={{borderBottom:`1px solid ${T.border}`,padding:"16px 18px",background:T.bg0,display:"flex",alignItems:"center",gap:10}}>{onBack&&<button onClick={onBack} style={{background:"none",border:"none",color:T.text2,cursor:"pointer",fontSize:22,width:36,height:36,display:"flex",alignItems:"center",justifyContent:"center",borderRadius:10,flexShrink:0}}>←</button>}<div><h1 style={{margin:0,fontSize:16,fontWeight:900,color:T.accent,letterSpacing:"0.02em"}}>🎨 TABLETOP READY</h1><div style={{fontSize:14,color:T.text3,marginTop:3}}>Shared — {projects.length} project{projects.length!==1?"s":""}</div></div></div>
   <div style={{padding:"12px 15px 40px",maxWidth:680,margin:"0 auto"}}>
     {onAddToCollection&&<div style={{background:T.green+"14",border:`1px solid ${T.green}35`,borderRadius:14,padding:"10px 13px",marginBottom:14,display:"flex",justifyContent:"space-between",alignItems:"center"}}><span style={{fontSize:14,color:T.green}}>Want to add these to your collection?</span><Btn sm v="ok" onClick={()=>onAddToCollection(projects)}>+ Add to Mine</Btn></div>}
     {projects.map((p,i)=>{const s=getStats(p);return(<div key={i} onClick={()=>setIdx(i)} style={{background:T.bg1,border:`1px solid ${T.border}`,borderRadius:16,padding:"16px 18px",marginBottom:10,cursor:"pointer"}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}><div><div style={{fontWeight:800,fontSize:15,color:T.text}}>{p.name}</div>{p.faction&&<div style={{fontSize:14,color:T.text3,marginTop:2}}>{p.faction}</div>}</div><div style={{textAlign:"right"}}><div style={{fontWeight:700,color:T.accent,fontSize:22,lineHeight:1}}>{s.total}</div><div style={{fontSize:14,color:T.text3}}>models</div></div></div><Bar stats={s}/><div style={{marginTop:7,fontSize:14,color:T.text3}}>{p.units.length} units · {(p.recipes||[]).length} recipes → tap to view</div></div>)})}
   </div></div>);
+}
+
+// ── Following Page ────────────────────────────────────────────────────────────
+// Users can paste a shared dashboard link (or project share link) to follow
+// someone's progress. Their latest shared snapshot is decoded and displayed.
+function FollowingPage({onClose}){
+  const [following,setFollowing]=useState(()=>lsLoad(SK_FOLLOWING,[]));
+  const [addUrl,setAddUrl]=useState("");
+  const [addError,setAddError]=useState("");
+  const [viewing,setViewing]=useState(null); // {type:"dashboard"|"projects", payload}
+
+  useEffect(()=>{lsSave(SK_FOLLOWING,following)},[following]);
+
+  function addFollow(){
+    const url=addUrl.trim();
+    if(!url){setAddError("Paste a share link first.");return}
+    // Try dashboard link
+    const dhash=url.match(/#dashboard=([^&]+)/);
+    if(dhash){
+      const payload=decodeDashboardShare("#dashboard="+dhash[1]);
+      if(payload){
+        const label=payload.projects?.[0]?.name||"Unknown";
+        setFollowing(f=>[...f.filter(x=>x.url!==url),{url,type:"dashboard",label:`${payload.projects?.length||0} projects`,ts:Date.now()}]);
+        setAddUrl("");setAddError("");return;
+      }
+    }
+    // Try project share link
+    const phash=url.match(/#share=([^&]+)/);
+    if(phash){
+      const projects=decodeShare("#share="+phash[1]);
+      if(projects){
+        const label=projects.map(p=>p.name).join(", ");
+        setFollowing(f=>[...f.filter(x=>x.url!==url),{url,type:"projects",label,ts:Date.now()}]);
+        setAddUrl("");setAddError("");return;
+      }
+    }
+    setAddError("Couldn't read that link — make sure it's a Tabletop Ready share link.");
+  }
+
+  function removeFollow(url){setFollowing(f=>f.filter(x=>x.url!==url))}
+
+  function openFollow(entry){
+    if(entry.type==="dashboard"){
+      const hash=entry.url.match(/#dashboard=([^&]+)/);
+      if(hash){const p=decodeDashboardShare("#dashboard="+hash[1]);if(p){setViewing({type:"dashboard",payload:p});return}}
+    } else {
+      const hash=entry.url.match(/#share=([^&]+)/);
+      if(hash){const p=decodeShare("#share="+hash[1]);if(p){setViewing({type:"projects",payload:p});return}}
+    }
+  }
+
+  if(viewing){
+    if(viewing.type==="dashboard")return<SharedDashboard payload={viewing.payload} onBack={()=>setViewing(null)}/>;
+    return<SharedView projects={viewing.payload} onAddToCollection={null} onBack={()=>setViewing(null)}/>;
+  }
+
+  return(<div style={{minHeight:"100dvh",background:T.bg0,color:T.text,fontFamily:"'Inter','SF Pro Display',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif",display:"flex",flexDirection:"column"}}>
+    <div style={{borderBottom:`1px solid ${T.border}`,padding:`calc(14px + env(safe-area-inset-top)) 15px 13px`,display:"flex",alignItems:"center",gap:10,background:T.bg1,position:"sticky",top:0,zIndex:50}}>
+      <button onClick={onClose} style={{background:"none",border:"none",color:T.text2,cursor:"pointer",fontSize:22,width:36,height:36,display:"flex",alignItems:"center",justifyContent:"center",borderRadius:10}}>←</button>
+      <div style={{flex:1}}>
+        <div style={{fontSize:11,fontWeight:800,color:T.text3,letterSpacing:"0.12em",textTransform:"uppercase"}}>TABLETOP READY</div>
+        <h1 style={{margin:0,fontSize:16,fontWeight:800,color:T.text}}>👥 Following</h1>
+      </div>
+    </div>
+    <div style={{flex:1,overflowY:"auto",padding:"12px 15px 40px",maxWidth:680,margin:"0 auto",width:"100%"}}>
+      {/* Add new follow */}
+      <div style={{background:T.bg1,border:`1px solid ${T.border}`,borderRadius:16,padding:"16px",marginBottom:16,marginTop:6}}>
+        <div style={{fontSize:13,fontWeight:700,color:T.text3,letterSpacing:"0.05em",textTransform:"uppercase",marginBottom:10}}>Follow someone's collection</div>
+        <div style={{display:"flex",gap:8,alignItems:"flex-start"}}>
+          <input value={addUrl} onChange={e=>{setAddUrl(e.target.value);setAddError("")}} placeholder="Paste a share link here…" style={{...IS,flex:1,fontSize:13}} onKeyDown={e=>e.key==="Enter"&&addFollow()}/>
+          <Btn sm onClick={addFollow} sx={{flexShrink:0,height:38}}>Follow</Btn>
+        </div>
+        {addError&&<div style={{fontSize:12,color:T.red,marginTop:6}}>{addError}</div>}
+        <div style={{fontSize:12,color:T.text3,marginTop:8,lineHeight:1.6}}>Ask your friend to tap 🔗 Share on their Dashboard or a project, then paste that link here.</div>
+      </div>
+
+      {/* Following list */}
+      {following.length===0&&<div style={{textAlign:"center",padding:"50px 20px",color:T.text3}}>
+        <div style={{fontSize:32,marginBottom:12}}>👥</div>
+        <div style={{fontSize:15,fontWeight:700,color:T.text,marginBottom:8}}>Not following anyone yet</div>
+        <div style={{fontSize:14}}>Paste a friend's share link above to follow their hobby progress.</div>
+      </div>}
+
+      {following.map((entry,i)=>(
+        <div key={i} onClick={()=>openFollow(entry)} style={{background:T.bg1,border:`1px solid ${T.border}`,borderRadius:16,padding:"14px 16px",marginBottom:10,cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",gap:10}}>
+          <div style={{flex:1,minWidth:0}}>
+            <div style={{fontSize:14,fontWeight:700,color:T.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{entry.label}</div>
+            <div style={{fontSize:12,color:T.text3,marginTop:2}}>
+              {entry.type==="dashboard"?"Shared Dashboard":"Shared Project"} · Saved {new Date(entry.ts).toLocaleDateString()}
+            </div>
+          </div>
+          <div style={{display:"flex",gap:8,alignItems:"center",flexShrink:0}}>
+            <span style={{fontSize:12,color:T.accent,fontWeight:700}}>View →</span>
+            <button onClick={e=>{e.stopPropagation();removeFollow(entry.url)}} style={{background:"none",border:`1px solid ${T.border}`,borderRadius:8,padding:"4px 8px",fontSize:12,color:T.text3,cursor:"pointer",fontFamily:"inherit"}}>Remove</button>
+          </div>
+        </div>
+      ))}
+    </div>
+  </div>);
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -1024,7 +1298,7 @@ function App(){
   const [syncStatus,setSyncStatus]=useState("idle"); // idle|syncing|synced|error
   const [syncError,setSyncError]=useState(null);
   const [cloudLoaded,setCloudLoaded]=useState(false);
-  const [screen,setScreen]=useState("dashboard");
+  const [screen,setScreen]=useState("dashboard"); // dashboard|projects|detail|paints|shopping|following
   const [activePid,setActivePid]=useState(null);
   const [tab,setTab]=useState("units");
   const [modal,setModal]=useState(null);
@@ -1090,8 +1364,8 @@ function App(){
   const addProject=()=>{if(!form.name?.trim())return;mut(ps=>[...ps,{id:nid(),name:form.name.trim(),faction:form.faction?.trim()||"",units:[],recipes:[]}]);close()};
   const saveProject=()=>{mut(ps=>ps.map(p=>p.id===editTarget?{...p,name:form.name?.trim()||p.name,faction:form.faction?.trim()??p.faction}:p));close()};
   const delProject=id=>{mut(ps=>ps.filter(p=>p.id!==id));setScreen("projects")};
-  const addUnit=()=>{if(!form.name?.trim())return;const u={id:nid(),name:form.name.trim(),models:parseInt(form.models)||1,status:form.status||"new_in_box",notes:form.notes||"",photo:form.photo||null,subgroups:null};mut(ps=>ps.map(p=>p.id===activePid?{...p,units:[...p.units,u]}:p));close()};
-  const saveUnit=()=>{mut(ps=>ps.map(p=>p.id===activePid?{...p,units:p.units.map(u=>u.id===editTarget?{...u,name:form.name?.trim()||u.name,models:parseInt(form.models)||u.models,status:form.status||u.status,notes:form.notes??u.notes,photo:form.photo!==undefined?form.photo:u.photo,subgroups:form.subgroups!==undefined?form.subgroups:u.subgroups}:u)}:p));close()};
+  const addUnit=()=>{if(!form.name?.trim())return;const u={id:nid(),name:form.name.trim(),models:parseInt(form.models)||1,status:form.status||"new_in_box",notes:form.notes||"",photos:form.photos||{before:null,wip:null,after:null},subgroups:null};mut(ps=>ps.map(p=>p.id===activePid?{...p,units:[...p.units,u]}:p));close()};
+  const saveUnit=()=>{mut(ps=>ps.map(p=>p.id===activePid?{...p,units:p.units.map(u=>u.id===editTarget?{...u,name:form.name?.trim()||u.name,models:parseInt(form.models)||u.models,status:form.status||u.status,notes:form.notes??u.notes,photos:form.photos!==undefined?form.photos:(u.photos||{before:u.photo||null,wip:null,after:null}),subgroups:form.subgroups!==undefined?form.subgroups:u.subgroups}:u)}:p));close()};
   const delUnit=id=>mut(ps=>ps.map(p=>p.id===activePid?{...p,units:p.units.filter(u=>u.id!==id)}:p));
 
   const changeUnitStatus=(uid,newStatus)=>{
@@ -1126,43 +1400,93 @@ function App(){
   if(session===undefined)return(<div style={{minHeight:"100dvh",background:T.bg0,display:"flex",alignItems:"center",justifyContent:"center"}}><div style={{color:T.accent,fontFamily:"monospace",fontSize:14,letterSpacing:"0.03em"}}>LOADING…</div></div>);
   if(!session&&!skipLogin)return<LoginScreen onSignIn={signIn} onSkip={()=>{lsSave("cq-skip-login",true);setSkipLogin(true)}}/>;
 
-  if(screen==="paints")return<PaintLibrary paints={paints} addPaint={addPaint} delPaint={delPaint} toggleOwned={toggleOwned} onClose={()=>setScreen("projects")}/>;
+  if(screen==="paints")return<PaintLibrary paints={paints} addPaint={addPaint} delPaint={delPaint} toggleOwned={toggleOwned} onClose={()=>setScreen("projects")}/>;  
+  if(screen==="shopping")return<ShoppingList data={data} paints={paints} onClose={()=>setScreen("projects")}/>;  
+  if(screen==="following")return<FollowingPage onClose={()=>setScreen("dashboard")}/>;
   if(screen==="account")return<AccountScreen session={session} syncStatus={syncStatus} syncError={syncError} onSignOut={()=>{signOut();setScreen("projects")}} onClose={()=>setScreen("projects")}/>;
 
-  const hdrTitle=screen==="detail"&&project?project.name:"🎨 TABLETOP READY";
-  const hdrSub=screen==="detail"&&project?(project.faction||"Project"):null;
+  const hdrTitle = screen==="detail"&&project ? project.name : null;
+  const hdrSub   = screen==="detail"&&project ? (project.faction||"") : null;
+
+  // ⋯ Settings menu items per screen
+  const menuItems = [];
+  if(screen==="dashboard"){
+    menuItems.push({label:"Share Dashboard",icon:"🔗",action:()=>setModal("shareDashboard")});
+    menuItems.push({label:"Export CSV",icon:"📄",action:()=>exportCSV(data)});
+    menuItems.push({label:"Export All (.mrp)",icon:"💾",action:doBackup});
+  }
+  if(screen==="projects"){
+    menuItems.push({label:"Import Projects",icon:"📂",action:()=>setModal("import")});
+    menuItems.push({label:"Export All (.mrp)",icon:"💾",action:doBackup});
+    menuItems.push({label:"Export CSV",icon:"📄",action:()=>exportCSV(data)});
+    menuItems.push({label:"Paint Shopping List",icon:"🛒",action:()=>setScreen("shopping")});
+  }
+  if(screen==="detail"&&project){
+    menuItems.push({label:"Share Project",icon:"🔗",action:()=>setShareTarget(project)});
+    menuItems.push({label:"Export Project (.mrp)",icon:"💾",action:()=>{exportProject(project);showToast("✓ Exported")}});
+    menuItems.push({label:"Edit Project",icon:"✏️",action:()=>{setForm({name:project.name,faction:project.faction});setEditTarget(activePid);setModal("editProject")}});
+  }
 
   return(<div style={{minHeight:"100dvh",background:T.bg0,color:T.text,fontFamily:"'Inter','SF Pro Display',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif",display:"flex",flexDirection:"column"}}>
 
-    {toast&&<div style={{position:"fixed",top:"calc(16px + env(safe-area-inset-top))",left:"50%",transform:"translateX(-50%)",background:T.bg1,border:`1px solid ${toast.color}50`,borderRadius:14,padding:"10px 18px",fontSize:14,fontWeight:700,color:toast.color,zIndex:999,boxShadow:"0 8px 32px rgba(0,0,0,0.15)",whiteSpace:"nowrap",pointerEvents:"none"}}>{toast.msg}</div>}
+    {toast&&<div style={{position:"fixed",top:"calc(16px + env(safe-area-inset-top))",left:"50%",transform:"translateX(-50%)",background:T.bg1,border:`1px solid ${toast.color}50`,borderRadius:14,padding:"10px 18px",fontSize:14,fontWeight:700,color:toast.color,zIndex:999,boxShadow:"0 8px 32px rgba(0,0,0,0.12)",whiteSpace:"nowrap",pointerEvents:"none"}}>{toast.msg}</div>}
 
-    {/* Header */}
-    <div style={{borderBottom:`1px solid ${T.border}`,padding:`calc(14px + env(safe-area-inset-top)) 15px 13px`,display:"flex",alignItems:"center",gap:10,background:T.bg0,flexShrink:0,position:"sticky",top:0,zIndex:50}}>
-      {screen==="detail"&&<button onClick={()=>{setScreen("projects");setActivePid(null);setFilter("all");setSearch("")}} style={{background:"none",border:"none",color:T.text2,cursor:"pointer",fontSize:22,width:36,height:36,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>}
-      <div style={{flex:1,minWidth:0}}>
-        {hdrSub&&<div style={{fontSize:14,color:T.text3,letterSpacing:"0.03em",textTransform:"uppercase"}}>{hdrSub}</div>}
-        <h1 style={{margin:0,fontSize:16,fontWeight:900,color:T.accent,letterSpacing:"0.02em",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{hdrTitle}</h1>
+    {/* Session expired inline banner */}
+    {!session&&skipLogin&&<SessionExpiredBanner onSignIn={()=>{lsSave("cq-skip-login",false);setSkipLogin(false)}}/>}
+
+    {/* ── Sticky header shell ── */}
+    <div style={{position:"sticky",top:0,zIndex:50,background:T.bg1,borderBottom:`1px solid ${T.border}`,flexShrink:0,boxShadow:"0 1px 0 rgba(0,0,0,0.04)"}}>
+
+      {/* Row 1: brand bar */}
+      <div style={{padding:`calc(env(safe-area-inset-top) + 12px) 16px 12px`,display:"flex",alignItems:"center",minHeight:52}}>
+        {/* Left: back arrow in detail, spacer otherwise */}
+        <div style={{width:36,flexShrink:0}}>
+          {screen==="detail"&&<button onClick={()=>{setScreen("projects");setActivePid(null);setFilter("all");setSearch("")}} style={{background:"none",border:"none",color:T.text2,cursor:"pointer",width:36,height:36,display:"flex",alignItems:"center",justifyContent:"center",borderRadius:10,fontSize:20}}>←</button>}
+        </div>
+
+        {/* Centre: app name always, project name below when in detail */}
+        <div style={{flex:1,textAlign:"center",minWidth:0}}>
+          <div style={{fontSize:11,fontWeight:800,color:T.text3,letterSpacing:"0.12em",textTransform:"uppercase",lineHeight:1}}>TABLETOP READY</div>
+          {hdrTitle&&<div style={{fontSize:16,fontWeight:800,color:T.text,marginTop:2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",maxWidth:"100%",lineHeight:1.15}}>{hdrTitle}</div>}
+          {hdrSub&&<div style={{fontSize:12,color:T.text3,marginTop:1}}>{hdrSub}</div>}
+        </div>
+
+        {/* Right: account icon + sync dot, then ⋯ menu */}
+        <div style={{width:72,flexShrink:0,display:"flex",alignItems:"center",justifyContent:"flex-end",gap:4}}>
+          {/* Account / sync */}
+          <button onClick={()=>setScreen("account")} title="Account & Sync" style={{background:"none",border:"none",cursor:"pointer",padding:0,width:32,height:32,display:"flex",alignItems:"center",justifyContent:"center",position:"relative",borderRadius:8}}>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={T.text2} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
+            {/* Sync dot */}
+            <span style={{position:"absolute",top:3,right:3,width:8,height:8,borderRadius:"50%",background:syncStatus==="synced"?T.green:syncStatus==="syncing"?T.blue:syncStatus==="error"?T.red:"transparent",border:`2px solid ${T.bg1}`,display:"block"}}/>
+          </button>
+          {/* ⋯ menu */}
+          <SettingsMenu items={menuItems}
+            primaryAction={
+              screen==="projects"?{label:"+ Project",action:()=>{setModal("addProject");setForm({})}}
+              :screen==="detail"&&tab==="units"?{label:"+ Unit",action:()=>{setModal("addUnit");setForm({status:"new_in_box",models:"1"})}}
+              :screen==="detail"&&tab==="recipes"?{label:"+ Recipe",action:()=>setRecipeModal({recipe:null,mode:"add"})}
+              :null
+            }
+          />
+        </div>
       </div>
-      <div style={{display:"flex",gap:5,flexShrink:0,alignItems:"center",flexWrap:"wrap",justifyContent:"flex-end"}}>
-        {session&&<button onClick={()=>setScreen("account")} title="Account & Sync" style={{background:"none",border:"none",cursor:"pointer",fontSize:16,padding:"4px 6px",display:"flex",alignItems:"center",gap:4}}><span style={{width:8,height:8,borderRadius:"50%",background:syncStatus==="synced"?T.green:syncStatus==="syncing"?T.blue:syncStatus==="error"?T.red:T.text3,display:"inline-block"}}/>👤</button>}
-        {screen==="dashboard"&&<Btn sm v="orange" onClick={()=>setModal("shareDashboard")}>🔗 Share</Btn>}
-        {(screen==="dashboard"||screen==="projects")&&<Btn sm v="ok" onClick={()=>exportCSV(data)}>↓ CSV</Btn>}
-        {screen==="projects"&&<><Btn sm v="blue" onClick={()=>setModal("import")}>↑ Import</Btn><Btn sm v="ok" onClick={doBackup}>↓ All</Btn><Btn sm onClick={()=>{setModal("addProject");setForm({})}}>+ Project</Btn></>}
-        {screen==="detail"&&project&&<>
-          <Btn sm v="orange" onClick={()=>setShareTarget(project)}>🔗 Share</Btn>
-          <Btn sm v="ok" onClick={()=>{exportProject(project);showToast("✓ Exported")}}>↓ Export</Btn>
-          <Btn sm v="sec" onClick={()=>{setForm({name:project.name,faction:project.faction});setEditTarget(activePid);setModal("editProject")}}>Edit</Btn>
-          {tab==="units"&&<Btn sm onClick={()=>{setModal("addUnit");setForm({status:"new_in_box",models:"1"})}}>+ Unit</Btn>}
-          {tab==="recipes"&&<Btn sm onClick={()=>setRecipeModal({recipe:null,mode:"add"})}>+ Recipe</Btn>}
-        </>}
-      </div>
-    </div>
+
+      {/* Row 2: search bar (projects + detail only) */}
+      {(screen==="projects"||screen==="detail")&&<div style={{padding:"0 14px 10px"}}>
+        <div style={{position:"relative"}}>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={T.text3} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{position:"absolute",left:11,top:"50%",transform:"translateY(-50%)"}}><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <input value={search} onChange={e=>setSearch(e.target.value)}
+            placeholder={screen==="projects"?"Search projects…":"Search units or notes…"}
+            style={{...IS,paddingLeft:33,paddingTop:"8px",paddingBottom:"8px",borderRadius:10,fontSize:14,background:T.bg2,border:`1px solid ${T.border}`}}
+          />
+          {search&&<button onClick={()=>setSearch("")} style={{position:"absolute",right:8,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",color:T.text3,cursor:"pointer",fontSize:18,width:28,height:28,display:"flex",alignItems:"center",justifyContent:"center"}}>×</button>}
+        </div>
+      </div>}
+
+    </div>{/* end sticky header shell */}
 
     {/* Backup banner */}
     {showBackupBanner&&screen!=="detail"&&<BackupBanner onExport={doBackup} onDismiss={()=>setShowBackupBanner(false)}/>}
-
-    {/* Search */}
-    {(screen==="projects"||screen==="detail")&&<div style={{padding:"10px 15px 0",maxWidth:680,margin:"0 auto",width:"100%",flexShrink:0}}><div style={{position:"relative"}}><span style={{position:"absolute",left:11,top:"50%",transform:"translateY(-50%)",color:T.text3,fontSize:14}}>🔍</span><input value={search} onChange={e=>setSearch(e.target.value)} placeholder={screen==="projects"?"Search projects, factions, units…":"Search units or notes…"} style={{...IS,paddingLeft:32}}/>{search&&<button onClick={()=>setSearch("")} style={{position:"absolute",right:8,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",color:T.text3,cursor:"pointer",fontSize:18}}>×</button>}</div></div>}
 
     {/* Content */}
     <div style={{flex:1,overflowY:"auto"}}>
@@ -1172,7 +1496,16 @@ function App(){
         {(()=>{const g={painted:0,built:0,unpainted:0,new_in_box:0,total:0};data.projects.forEach(p=>{const s=getStats(p);Object.keys(g).forEach(k=>g[k]+=s[k])});return(<div style={{background:T.bg1,border:`1px solid ${T.border}`,borderRadius:16,padding:"14px 17px",marginBottom:14,marginTop:6}}><div style={{fontSize:14,color:T.text3,letterSpacing:"0.03em",textTransform:"uppercase",marginBottom:7,fontWeight:700}}>Collection — {g.total} models · {data.projects.length} project{data.projects.length!==1?"s":""}</div><Bar stats={g}/><div style={{display:"flex",gap:12,flexWrap:"wrap",marginTop:7}}>{Object.entries(SC).map(([k,c])=><div key={k} style={{fontSize:13,background:c.bg,color:c.color,fontWeight:700,borderRadius:20,padding:"4px 11px",display:"flex",alignItems:"center",gap:6}}><span style={{fontSize:14}}>{c.icon}</span>{g[k]}</div>)}</div></div>)})()}
         {shownProjects.length===0&&<div style={{textAlign:"center",color:T.text3,padding:"50px 0",fontSize:14}}>{search?"No projects match.":"No projects yet!"}</div>}
         {shownProjects.map(p=>{const s=getStats(p);return(<div key={p.id} onClick={()=>goToProject(p.id)} style={{background:T.bg1,border:`1px solid ${T.border}`,borderRadius:16,padding:"16px 18px",marginBottom:10,cursor:"pointer",WebkitTapHighlightColor:"transparent"}}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}><div><div style={{fontWeight:800,fontSize:15,color:T.text}}>{p.name}</div>{p.faction&&<div style={{fontSize:14,color:T.text3,marginTop:2}}>{p.faction}</div>}</div><div style={{textAlign:"right"}}><div style={{fontWeight:700,color:T.accent,fontSize:22,lineHeight:1}}>{s.total}</div><div style={{fontSize:14,color:T.text3}}>models</div></div></div>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                <div style={{fontWeight:800,fontSize:15,color:T.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{p.name}</div>
+                {s.total>0&&s.painted===s.total&&<span style={{fontSize:12,background:T.green+"18",color:T.green,border:`1px solid ${T.green}30`,borderRadius:20,padding:"2px 8px",fontWeight:700,flexShrink:0}}>✓ Complete</span>}
+              </div>
+              {p.faction&&<div style={{fontSize:14,color:T.text3,marginTop:2}}>{p.faction}</div>}
+            </div>
+            <div style={{textAlign:"right",flexShrink:0,marginLeft:10}}><div style={{fontWeight:700,color:T.accent,fontSize:22,lineHeight:1}}>{s.total}</div><div style={{fontSize:14,color:T.text3}}>models</div></div>
+          </div>
           <Bar stats={s}/><div style={{display:"flex",gap:9,flexWrap:"wrap",marginTop:5}}>{Object.entries(SC).map(([k,c])=>s[k]>0&&<span key={k} style={{fontSize:14,color:c.color}}>{c.icon} {s[k]} {c.label}</span>)}</div>
           <div style={{marginTop:7,fontSize:14,color:T.text3}}>{p.units.length} unit{p.units.length!==1?"s":""} · {(p.recipes||[]).length} recipe{(p.recipes||[]).length!==1?"s":""} → tap to open</div>
         </div>)})}
@@ -1207,7 +1540,7 @@ function App(){
 
     {/* Bottom Nav */}
     <div style={{position:"fixed",bottom:0,left:0,right:0,background:T.bg0,borderTop:`1px solid ${T.border}`,display:"flex",zIndex:100,paddingBottom:"env(safe-area-inset-bottom)"}}>
-      {[{id:"dashboard",icon:"📊",label:"Dashboard"},{id:"projects",icon:"⚔️",label:"Projects"},{id:"paints",icon:"🎨",label:"Paints"}].map(({id,icon,label})=>{
+      {[{id:"dashboard",icon:"📊",label:"Dashboard"},{id:"projects",icon:"⚔️",label:"Projects"},{id:"following",icon:"👥",label:"Following"},{id:"paints",icon:"🎨",label:"Paints"}].map(({id,icon,label})=>{
         const active=screen===id||(screen==="detail"&&id==="projects");
         return(<button key={id} onClick={()=>{if(id==="projects"&&screen==="detail"){setScreen("projects");setActivePid(null);setFilter("all");setSearch("")}else{setScreen(id)}}} style={{flex:1,padding:"10px 8px 9px",background:"none",border:"none",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:3,WebkitTapHighlightColor:"transparent",opacity:active?1:0.45}}>
           <span style={{fontSize:19}}>{icon}</span>
@@ -1225,7 +1558,7 @@ function App(){
     {modal==="import"&&<ImportModal onClose={close} onImport={handleImport}/>}
     {modal==="addProject"&&<Modal title="New Project" onClose={close}><Inp label="Project Name" placeholder="e.g. Orks Waaagh!" value={form.name||""} onChange={e=>sf("name",e.target.value)} autoFocus/><Inp label="Faction / Army" placeholder="e.g. Orks, Space Marines…" value={form.faction||""} onChange={e=>sf("faction",e.target.value)}/><div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:4}}><Btn v="sec" sm onClick={close}>Cancel</Btn><Btn sm onClick={addProject}>Create</Btn></div></Modal>}
     {modal==="editProject"&&<Modal title="Edit Project" onClose={close}><Inp label="Project Name" value={form.name||""} onChange={e=>sf("name",e.target.value)} autoFocus/><Inp label="Faction / Army" value={form.faction||""} onChange={e=>sf("faction",e.target.value)}/><div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:4}}><Btn v="sec" sm onClick={close}>Cancel</Btn><Btn sm onClick={saveProject}>Save</Btn></div></Modal>}
-    {(modal==="addUnit"||modal==="editUnit")&&<Modal title={modal==="addUnit"?"Add Unit":"Edit Unit"} onClose={close} wide><Inp label="Unit Name" placeholder="e.g. Boyz Squad, Terminators…" value={form.name||""} onChange={e=>sf("name",e.target.value)} autoFocus/><Inp label="Number of Models" type="number" min="1" value={form.models||"1"} onChange={e=>sf("models",e.target.value)}/><Sel label="Status" value={form.status||"new_in_box"} onChange={e=>sf("status",e.target.value)}>{Object.entries(SC).map(([k,v])=><option key={k} value={k}>{v.icon} {v.label}</option>)}</Sel><Txt label="Notes" placeholder="Assembly notes, colour cues, WIP ideas…" value={form.notes||""} onChange={e=>sf("notes",e.target.value)}/><PhotoUpload value={form.photo||null} onChange={v=>sf("photo",v)}/><div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:6}}><Btn v="sec" sm onClick={close}>Cancel</Btn><Btn sm onClick={modal==="addUnit"?addUnit:saveUnit}>{modal==="addUnit"?"Add Unit":"Save"}</Btn></div></Modal>}
+    {(modal==="addUnit"||modal==="editUnit")&&<Modal title={modal==="addUnit"?"Add Unit":"Edit Unit"} onClose={close} wide><Inp label="Unit Name" placeholder="e.g. Boyz Squad, Terminators…" value={form.name||""} onChange={e=>sf("name",e.target.value)} autoFocus/><Inp label="Number of Models" type="number" min="1" value={form.models||"1"} onChange={e=>sf("models",e.target.value)}/><Sel label="Status" value={form.status||"new_in_box"} onChange={e=>sf("status",e.target.value)}>{Object.entries(SC).map(([k,v])=><option key={k} value={k}>{v.icon} {v.label}</option>)}</Sel><Txt label="Notes" placeholder="Assembly notes, colour cues, WIP ideas…" value={form.notes||""} onChange={e=>sf("notes",e.target.value)}/><MultiPhotoUpload photos={form.photos||{before:null,wip:null,after:null}} onChange={v=>sf("photos",v)}/><div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:6}}><Btn v="sec" sm onClick={close}>Cancel</Btn><Btn sm onClick={modal==="addUnit"?addUnit:saveUnit}>{modal==="addUnit"?"Add Unit":"Save"}</Btn></div></Modal>}
     {recipeModal&&<RecipeModal recipe={recipeModal.recipe} onSave={saveRecipe} onClose={()=>setRecipeModal(null)} paints={paints} addPaint={addPaint}/>}
   </div>);
 }
