@@ -7,11 +7,11 @@
 <meta name="apple-mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-status-bar-style" content="default"/>
 <meta name="apple-mobile-web-app-title" content="Tabletop Ready"/>
-<meta name="theme-color" content="#eef0f4"/>
+<meta name="theme-color" content="#f4f5f8"/>
 <title>Tabletop Ready</title>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-html,body{height:100%;background:#eef0f4;overscroll-behavior:none}
+html,body{height:100%;background:#f4f5f8;overscroll-behavior:none}
 body{-webkit-tap-highlight-color:transparent;font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}
 #root{min-height:100dvh}
 *{scrollbar-width:none}*::-webkit-scrollbar{display:none}
@@ -28,7 +28,7 @@ body{-webkit-tap-highlight-color:transparent;font-family:'Inter',-apple-system,B
 <script type="text/babel">
 const {useState,useEffect,useMemo,useRef,useCallback} = React;
 
-const T={bg0:"#eef0f4",bg1:"#ffffff",bg2:"#f0f2f5",border:"#e2e5ea",border2:"#cfd4dc",text:"#1a1d23",text2:"#5b6472",text3:"#9aa1ad",accent:"#4f5fd6",accentDim:"rgba(79,95,214,0.10)",green:"#1f9d55",blue:"#2473d6",yellow:"#b8860b",orange:"#c2680a",red:"#d6402f"};
+const T={bg0:"#f4f5f8",bg1:"#ffffff",bg2:"#f8f9fb",border:"#eceef2",border2:"#dde0e7",text:"#111318",text2:"#4a5568",text3:"#94a3b8",accent:"#5b6af0",accentDim:"rgba(91,106,240,0.08)",accentLight:"rgba(91,106,240,0.15)",green:"#16a34a",greenDim:"rgba(22,163,74,0.10)",blue:"#2563eb",blueDim:"rgba(37,99,235,0.10)",yellow:"#d97706",yellowDim:"rgba(217,119,6,0.10)",orange:"#ea580c",red:"#dc2626",redDim:"rgba(220,38,38,0.10)",shadow:"0 1px 3px rgba(0,0,0,0.06),0 1px 8px rgba(0,0,0,0.04)",shadowMd:"0 4px 16px rgba(0,0,0,0.08),0 1px 4px rgba(0,0,0,0.04)"};
 
 const GID="455364707867-m9lpq40cs3kmnirpubdh7sqbrtfpta4m.apps.googleusercontent.com";
 const GSCOPE="https://www.googleapis.com/auth/drive.appdata https://www.googleapis.com/auth/userinfo.email";
@@ -47,9 +47,9 @@ const lsGet=(k,d)=>{try{const r=localStorage.getItem(k);return r?JSON.parse(r):d
 const lsSet=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v));}catch(e){}};
 
 const DEF_PAINTS=[{id:"p1",brand:"Citadel",type:"Base",name:"Macragge Blue",owned:true},{id:"p2",brand:"Citadel",type:"Base",name:"Abaddon Black",owned:true},{id:"p3",brand:"Citadel",type:"Base",name:"Leadbelcher",owned:true},{id:"p4",brand:"Citadel",type:"Shade",name:"Nuln Oil",owned:true},{id:"p5",brand:"Citadel",type:"Shade",name:"Agrax Earthshade",owned:true},{id:"p6",brand:"Citadel",type:"Layer",name:"Calgar Blue",owned:true},{id:"p7",brand:"Citadel",type:"Layer",name:"Fenrisian Grey",owned:true},{id:"p8",brand:"Citadel",type:"Dry",name:"Ironbreaker",owned:true},{id:"p9",brand:"Citadel",type:"Contrast",name:"Blood Angels Red",owned:false},{id:"p10",brand:"Vallejo",type:"Model Color",name:"Flat Black",owned:true},{id:"p11",brand:"Army Painter",type:"Primer",name:"Matt Black",owned:true}];
-const DEF_DATA={projects:[{id:1,name:"Space Marines",faction:"Adeptus Astartes",units:[{id:1,name:"Tactical Squad",models:10,status:"painted",notes:"Ultramarines blue.",photos:{before:null,wip:null,after:null},subgroups:null},{id:2,name:"Terminators",models:5,status:"built",notes:"",photos:{before:null,wip:null,after:null},subgroups:null},{id:3,name:"Land Raider",models:1,status:"new_in_box",notes:"",photos:{before:null,wip:null,after:null},subgroups:null}],recipes:[{id:101,name:"Power Armour",steps:[{phase:"Base",paint:"Macragge Blue",brand:"Citadel",type:"Base",notes:"2 thin coats"},{phase:"Shade",paint:"Nuln Oil",brand:"Citadel",type:"Shade",notes:"Into recesses"},{phase:"Layer",paint:"Calgar Blue",brand:"Citadel",type:"Layer",notes:"Raised areas"},{phase:"Highlight",paint:"Fenrisian Grey",brand:"Citadel",type:"Layer",notes:"Edges only"}]}]}]};
+const DEF_DATA={projects:[]};
 
-const SC={new_in_box:{label:"New in Box",color:T.accent,bg:"rgba(79,95,214,0.10)"},unbuilt:{label:"Unbuilt",color:T.yellow,bg:"rgba(184,134,11,0.10)"},built:{label:"Built",color:T.blue,bg:"rgba(36,115,214,0.10)"},painted:{label:"Painted",color:T.green,bg:"rgba(31,157,85,0.10)"}};
+const SC={new_in_box:{label:"New in Box",color:T.accent,bg:T.accentLight},unbuilt:{label:"Unbuilt",color:T.yellow,bg:T.yellowDim},built:{label:"Built",color:T.blue,bg:T.blueDim},painted:{label:"Painted",color:T.green,bg:T.greenDim}};
 const ICONS={new_in_box:"📦",unbuilt:"🔩",built:"🔧",painted:"🎨"};
 const SCYCLE=["new_in_box","unbuilt","built","painted"];
 const PHASES=["Base","Shade","Layer","Highlight","Drybrush","Edge Highlight","Glaze","Varnish","Other"];
@@ -71,7 +71,7 @@ function dlJSON(obj,fn){const a=document.createElement("a");a.href=URL.createObj
 function expCSV(data){const rows=[["Project","Faction","Unit","Models","Status","Notes"]];data.projects.forEach(p=>p.units.forEach(u=>rows.push([p.name,p.faction||"",u.name,u.models,SC[u.status]?SC[u.status].label:u.status,(u.notes||"").replace(/\n/g," ")])));const csv=rows.map(r=>r.map(c=>'"'+String(c).replace(/"/g,'""')+'"').join(",")).join("\n");const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"}));a.download="tabletop-ready.csv";a.click();}
 const toB64=f=>new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result);r.onerror=rej;r.readAsDataURL(f);});
 const toTxt=f=>new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result);r.onerror=rej;r.readAsText(f);});
-async function parseImp(file){try{const raw=JSON.parse(await toTxt(file));if(!raw._mrp&&!raw._tr)return{ok:false,error:"Not a valid backup file."};const ps=raw.projects?raw.projects:raw.project?[raw.project]:null;if(!ps||!ps.length)return{ok:false,error:"No projects found."};return{ok:true,projects:ps};}catch(e){return{ok:false,error:"Could not read file."};}}
+async function parseImp(file){try{const raw=JSON.parse(await toTxt(file));const ps=raw.projects?raw.projects:raw.project?[raw.project]:null;if(!ps||!ps.length)return{ok:false,error:"No projects found in this file."};return{ok:true,projects:ps};}catch(e){return{ok:false,error:"Could not read file - make sure it is a .mrp backup."};}}
 
 function useAuth(){
   const [sess,setSess]=useState(undefined);
@@ -84,7 +84,13 @@ function useAuth(){
   return {sess,signIn,signOut};
 }
 function usePaints(){
-  const [paints,setPaints]=useState(()=>lsGet(SK.paints,DEF_PAINTS));
+  const [paints,setPaints]=useState(()=>{
+    const fresh=lsGet(SK.paints,null);
+    if(fresh)return fresh;
+    const old=lsGet("cq-paints-v1",null)||lsGet("mr-paints-v1",null);
+    if(old)return old;
+    return DEF_PAINTS;
+  });
   useEffect(()=>{lsSet(SK.paints,paints);},[paints]);
   const addP=p=>{const np={...p,id:"p"+nid(),owned:p.owned!==undefined?p.owned:true};setPaints(ps=>[...ps,np]);return np;};
   const delP=id=>setPaints(ps=>ps.filter(p=>p.id!==id));
@@ -98,17 +104,44 @@ function useLog(){
   return{log,setLog,addE};
 }
 
-const IS={width:"100%",background:T.bg2,border:"1px solid "+T.border,borderRadius:10,color:T.text,padding:"9px 12px",fontSize:14,fontFamily:"inherit",outline:"none",boxSizing:"border-box"};
-const LS={display:"block",color:T.text3,fontSize:11,marginBottom:5,fontWeight:700,letterSpacing:"0.06em",textTransform:"uppercase"};
+const IS={width:"100%",background:T.bg2,border:"1px solid transparent",borderRadius:12,color:T.text,padding:"11px 14px",fontSize:15,fontFamily:"inherit",outline:"none",boxSizing:"border-box",transition:"border-color 0.15s, background 0.15s"};
+const LS={display:"block",color:T.text3,fontSize:11,marginBottom:6,fontWeight:600,letterSpacing:"0.07em",textTransform:"uppercase"};
 const Field=({label,children,mb=13})=><div style={{marginBottom:mb}}>{label&&<label style={LS}>{label}</label>}{children}</div>;
 const Inp=({label,mb,...p})=><Field label={label} mb={mb}><input {...p} style={{...IS,...p.style}}/></Field>;
 const Txt=({label,...p})=><Field label={label}><textarea {...p} style={{...IS,resize:"vertical",minHeight:80,lineHeight:1.5,...p.style}}/></Field>;
 const Sel=({label,children,...p})=><Field label={label}><select {...p} style={{...IS,cursor:"pointer",appearance:"none",WebkitAppearance:"none"}}>{children}</select></Field>;
-function Btn({v="pri",sm,children,sx={},...p}){const M={pri:{background:T.accent,color:"#fff",border:"none"},sec:{background:"transparent",color:T.text2,border:"1px solid "+T.border},del:{background:"transparent",color:T.red,border:"1px solid "+T.red+"40"},ok:{background:T.green+"20",color:T.green,border:"1px solid "+T.green+"40"},blue:{background:T.blue+"20",color:T.blue,border:"1px solid "+T.blue+"40"},orange:{background:T.orange+"20",color:T.orange,border:"1px solid "+T.orange+"40"}};return <button {...p} style={{padding:sm?"6px 12px":"10px 16px",borderRadius:10,cursor:"pointer",fontWeight:700,fontSize:sm?12:14,fontFamily:"inherit",...M[v],...sx}}>{children}</button>;}
-function Badge({status}){const c=SC[status]||{label:status,color:T.text3,bg:T.bg2};return <span style={{background:c.bg,color:c.color,border:"1px solid "+c.color+"40",borderRadius:20,padding:"3px 10px",fontSize:11,fontWeight:700,letterSpacing:"0.04em",textTransform:"uppercase",whiteSpace:"nowrap"}}>{ICONS[status]||""} {c.label}</span>;}
-function Bar({stats}){if(!stats||!stats.total)return null;return <div style={{display:"flex",gap:3,height:8,borderRadius:6,overflow:"hidden",margin:"10px 0 6px"}}>{Object.entries(SC).map(([k,c])=>stats[k]>0&&<div key={k} style={{flex:stats[k],background:c.color,opacity:0.85,borderRadius:6}}/>)}</div>;}
-function Modal({title,onClose,children,wide}){return <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.6)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:300,padding:14}} onClick={onClose}><div style={{background:T.bg1,border:"1px solid "+T.border,borderRadius:16,padding:"22px 20px 18px",width:"100%",maxWidth:wide?600:440,maxHeight:"92vh",overflowY:"auto",boxShadow:"0 24px 64px rgba(0,0,0,0.4)"}} onClick={e=>e.stopPropagation()}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}><h3 style={{margin:0,color:T.text,fontSize:15,fontWeight:800}}>{title}</h3><button onClick={onClose} style={{background:"none",border:"none",color:T.text3,cursor:"pointer",fontSize:22,lineHeight:1}}>x</button></div>{children}</div></div>;}
-function TabBar({tabs,active,onChange}){return <div style={{display:"flex",gap:3,background:T.bg2,borderRadius:10,padding:3,marginBottom:14,border:"1px solid "+T.border}}>{tabs.map(t=><button key={t.id} onClick={()=>onChange(t.id)} style={{flex:1,padding:"8px 6px",borderRadius:8,border:"none",cursor:"pointer",fontWeight:700,fontSize:11,fontFamily:"inherit",letterSpacing:"0.04em",textTransform:"uppercase",background:active===t.id?T.accentDim:"transparent",color:active===t.id?T.accent:T.text3,borderBottom:active===t.id?"2px solid "+T.accent:"2px solid transparent"}}>{t.label}</button>)}</div>;}
+function Btn({v="pri",sm,children,sx={},...p}){
+  const M={
+    pri:{background:T.accent,color:"#fff",border:"none",boxShadow:"0 1px 3px rgba(91,106,240,0.35)"},
+    sec:{background:T.bg2,color:T.text2,border:"1px solid "+T.border},
+    del:{background:"transparent",color:T.red,border:"1px solid "+T.red+"30"},
+    ok:{background:T.greenDim,color:T.green,border:"1px solid "+T.green+"30"},
+    blue:{background:T.blueDim,color:T.blue,border:"1px solid "+T.blue+"30"},
+    orange:{background:"rgba(234,88,12,0.10)",color:T.orange,border:"1px solid "+T.orange+"30"},
+  };
+  return <button {...p} style={{padding:sm?"6px 13px":"11px 18px",borderRadius:12,cursor:"pointer",fontWeight:600,fontSize:sm?12:14,fontFamily:"inherit",transition:"opacity 0.12s,transform 0.12s",...M[v],...sx}} onMouseDown={e=>e.currentTarget.style.transform="scale(0.97)"} onMouseUp={e=>e.currentTarget.style.transform=""} onMouseLeave={e=>e.currentTarget.style.transform=""}>{children}</button>;
+}
+function Badge({status,count}){
+  const c=SC[status]||{label:status,color:T.text3,bg:T.bg2};
+  return <span style={{display:"inline-flex",alignItems:"center",gap:5,background:c.bg,color:c.color,borderRadius:20,padding:"4px 10px",fontSize:12,fontWeight:600,whiteSpace:"nowrap"}}>
+    <span style={{fontSize:13}}>{ICONS[status]||""}</span>
+    {count!=null?<span>{count}</span>:<span>{c.label}</span>}
+  </span>;
+}
+function Bar({stats}){if(!stats||!stats.total)return null;return <div style={{display:"flex",gap:2,height:6,borderRadius:6,overflow:"hidden",margin:"10px 0 6px"}}>{Object.entries(SC).map(([k,c])=>stats[k]>0&&<div key={k} title={c.label+": "+stats[k]} style={{flex:stats[k],background:c.color}}/>)}</div>;}
+function Modal({title,onClose,children,wide}){
+  return <div style={{position:"fixed",inset:0,background:"rgba(15,20,35,0.5)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:300,padding:"0"}} onClick={onClose}>
+    <div style={{background:T.bg1,borderRadius:"20px 20px 0 0",padding:"20px 20px 28px",width:"100%",maxWidth:wide?680:520,maxHeight:"92vh",overflowY:"auto",boxShadow:"0 -8px 40px rgba(0,0,0,0.18)"}} onClick={e=>e.stopPropagation()}>
+      <div style={{width:36,height:4,borderRadius:2,background:T.border2,margin:"0 auto 18px",flexShrink:0}}/>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
+        <h3 style={{margin:0,color:T.text,fontSize:17,fontWeight:700}}>{title}</h3>
+        <button onClick={onClose} style={{background:T.bg2,border:"none",borderRadius:"50%",width:30,height:30,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",color:T.text3,fontSize:16}}>x</button>
+      </div>
+      {children}
+    </div>
+  </div>;
+}
+function TabBar({tabs,active,onChange}){return <div style={{display:"flex",gap:3,background:T.bg2,borderRadius:14,padding:4,marginBottom:16}}>{tabs.map(t=><button key={t.id} onClick={()=>onChange(t.id)} style={{flex:1,padding:"9px 8px",borderRadius:10,border:"none",cursor:"pointer",fontWeight:active===t.id?700:500,fontSize:13,fontFamily:"inherit",background:active===t.id?"#fff":"transparent",color:active===t.id?T.text:T.text3,boxShadow:active===t.id?T.shadow:"none",transition:"all 0.15s"}}>{t.label}</button>)}</div>;}
 
 let _uid=0;
 function PhotoSlot({label,value,onChange}){
@@ -152,7 +185,7 @@ function PaintPicker({step,onChange,paints,addP}){
 const newStep=()=>({phase:"Base",paint:"",brand:"",type:"",notes:""});
 function StepRow({step,idx,onChange,onDelete,paints,addP}){
   const col=SCOLS[idx%SCOLS.length];
-  return <div style={{background:T.bg2,border:"1px solid "+T.border,borderRadius:12,padding:"12px 13px",marginBottom:8}}>
+  return <div style={{background:T.bg2,borderRadius:14,padding:"14px",marginBottom:10}}>
     <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:10}}>
       <div style={{width:22,height:22,borderRadius:6,background:col+"25",border:"1px solid "+col+"60",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:900,color:col,flexShrink:0}}>{idx+1}</div>
       <div style={{flex:1}}><label style={{...LS,marginBottom:3}}>Phase</label><select value={step.phase} onChange={e=>onChange({...step,phase:e.target.value})} style={{...IS,padding:"6px 9px",fontSize:13}}>{PHASES.map(ph=><option key={ph} value={ph}>{ph}</option>)}</select></div>
@@ -164,19 +197,40 @@ function StepRow({step,idx,onChange,onDelete,paints,addP}){
 }
 
 function RecipeCard({recipe,onEdit,onDelete,onPaint,readOnly}){
-  const [exp,setExp]=useState(true);
+  const [exp,setExp]=useState(false);
   const steps=Array.isArray(recipe.steps)?recipe.steps:[];
-  return <div style={{background:T.bg1,border:"1px solid "+T.border,borderRadius:14,padding:"13px 15px",marginBottom:9}}>
-    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:exp?10:0}}>
-      <div style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",flex:1}} onClick={()=>setExp(e=>!e)}>
-        <span style={{fontSize:15}}>🎨</span><span style={{fontWeight:800,color:T.text,fontSize:14}}>{recipe.name}</span>
-        <span style={{fontSize:12,color:T.text3}}>{steps.length} step{steps.length!==1?"s":""}</span>
-        <span style={{fontSize:12,color:T.text3,marginLeft:"auto",paddingRight:8}}>{exp?"^":"v"}</span>
+  return <div style={{background:T.bg1,borderRadius:16,marginBottom:10,boxShadow:T.shadow,overflow:"hidden"}}>
+    {/* Header row - always visible */}
+    <div style={{padding:"14px 16px",display:"flex",alignItems:"center",gap:12}}>
+      <div style={{width:40,height:40,borderRadius:12,background:T.accentDim,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0}}>🎨</div>
+      <div style={{flex:1,minWidth:0,cursor:"pointer"}} onClick={()=>setExp(e=>!e)}>
+        <div style={{fontWeight:700,fontSize:15,color:T.text,lineHeight:1.2}}>{recipe.name}</div>
+        <div style={{fontSize:12,color:T.text3,marginTop:2}}>{steps.length} step{steps.length!==1?"s":""} {steps.length>0&&"· tap to "+(exp?"collapse":"expand")}</div>
       </div>
-      {!readOnly&&<div style={{display:"flex",gap:5,flexShrink:0}}>{steps.length>0&&<Btn sm v="blue" onClick={()=>onPaint(recipe)}>Paint</Btn>}<Btn sm v="sec" onClick={()=>onEdit(recipe)}>Edit</Btn><Btn sm v="del" onClick={()=>onDelete(recipe.id)}>x</Btn></div>}
+      {!readOnly&&<div style={{display:"flex",gap:6,flexShrink:0}}>
+        {steps.length>0&&<Btn sm v="blue" onClick={()=>onPaint(recipe)}>▶ Paint</Btn>}
+        <Btn sm v="sec" onClick={()=>onEdit(recipe)}>Edit</Btn>
+        <button onClick={()=>onDelete(recipe.id)} style={{background:"none",border:"none",cursor:"pointer",color:T.text3,fontSize:18,width:28,height:28,display:"flex",alignItems:"center",justifyContent:"center"}}>x</button>
+      </div>}
     </div>
-    {exp&&<div style={{display:"flex",flexDirection:"column",gap:6}}>
-      {steps.map((s,i)=>{const col=SCOLS[i%SCOLS.length];return <div key={i} style={{display:"flex",alignItems:"flex-start",gap:9,background:T.bg2,borderRadius:10,padding:"9px 11px"}}><div style={{width:20,height:20,borderRadius:5,background:col+"22",border:"1px solid "+col+"50",display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:900,color:col,flexShrink:0,marginTop:1}}>{i+1}</div><div style={{flex:1,minWidth:0}}><div style={{fontSize:13}}><span style={{color:T.text3,fontWeight:700}}>{s.phase}: </span><span style={{color:T.text,fontWeight:600}}>{s.paint||<em style={{color:T.text3}}>No paint</em>}</span>{(s.brand||s.type)&&<span style={{color:T.text3,fontSize:12}}> ({[s.brand,s.type].filter(Boolean).join(" - ")})</span>}</div>{s.notes&&<div style={{fontSize:12,color:T.text3,marginTop:3,fontStyle:"italic"}}>{s.notes}</div>}</div></div>;})}
+    {/* Compact step pills - always shown */}
+    {steps.length>0&&!exp&&<div style={{padding:"0 16px 14px",display:"flex",gap:6,flexWrap:"wrap"}}>
+      {steps.map((s,i)=>{const col=SCOLS[i%SCOLS.length];return <div key={i} style={{display:"flex",alignItems:"center",gap:5,background:col+"12",borderRadius:20,padding:"4px 10px"}}>
+        <div style={{width:6,height:6,borderRadius:"50%",background:col,flexShrink:0}}/>
+        <span style={{fontSize:12,color:col,fontWeight:600}}>{s.phase}</span>
+        {s.paint&&<span style={{fontSize:12,color:T.text2}}>· {s.paint}</span>}
+      </div>;})}
+    </div>}
+    {/* Expanded full detail */}
+    {exp&&<div style={{borderTop:"1px solid "+T.border,padding:"12px 16px 14px",display:"flex",flexDirection:"column",gap:8}}>
+      {steps.map((s,i)=>{const col=SCOLS[i%SCOLS.length];return <div key={i} style={{display:"flex",alignItems:"flex-start",gap:12}}>
+        <div style={{width:24,height:24,borderRadius:8,background:col+"18",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:700,color:col,flexShrink:0,marginTop:1}}>{i+1}</div>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{fontSize:14}}><span style={{color:T.text3,fontWeight:600,fontSize:12}}>{s.phase} </span><span style={{color:T.text,fontWeight:600}}>{s.paint||<em style={{color:T.text3}}>No paint selected</em>}</span></div>
+          {(s.brand||s.type)&&<div style={{fontSize:12,color:T.text3,marginTop:1}}>{[s.brand,s.type].filter(Boolean).join(" · ")}</div>}
+          {s.notes&&<div style={{fontSize:12,color:T.text2,marginTop:3,fontStyle:"italic"}}>{s.notes}</div>}
+        </div>
+      </div>;})}
       {steps.length===0&&<div style={{fontSize:13,color:T.text3}}>No steps yet.</div>}
     </div>}
   </div>;
@@ -223,7 +277,7 @@ function PaintMode({recipe,onClose,paints}){
         <div><div style={{fontSize:11,color:T.text3,fontWeight:700,textTransform:"uppercase",letterSpacing:"0.08em"}}>Step {idx+1}</div><div style={{fontSize:22,fontWeight:900,color:T.text,lineHeight:1.1}}>{step.phase}</div></div>
         {done.has(idx)&&<div style={{marginLeft:"auto",fontSize:18,color:T.green}}>Done</div>}
       </div>
-      <div style={{background:T.bg2,border:"1px solid "+T.border,borderRadius:14,padding:"18px",marginBottom:16,textAlign:"center"}}>
+      <div style={{background:T.bg2,borderRadius:18,padding:"20px",marginBottom:16,textAlign:"center"}}>
         <div style={{fontSize:24,marginBottom:8}}>🎨</div>
         <div style={{fontSize:22,fontWeight:900,color:T.text,marginBottom:6}}>{step.paint||<em style={{color:T.text3,fontSize:16}}>No paint</em>}</div>
         {(step.brand||step.type)&&<div style={{fontSize:13,color:T.text3}}>{[step.brand,step.type].filter(Boolean).join(" - ")}</div>}
@@ -239,40 +293,99 @@ function PaintMode({recipe,onClose,paints}){
   </div>;
 }
 
-function UnitCard({unit,onEdit,onDelete,onStatus,onSplit,onDupe}){
+function UnitCardMenu({unit,onEdit,onDelete,onSplit,onDupe}){
+  const [open,setOpen]=useState(false);
+  const ref=useRef();
+  useEffect(()=>{if(!open)return;const h=e=>{if(ref.current&&!ref.current.contains(e.target))setOpen(false);};document.addEventListener("mousedown",h);document.addEventListener("touchstart",h,{passive:true});return()=>{document.removeEventListener("mousedown",h);document.removeEventListener("touchstart",h);};},[open]);
+  return <div ref={ref} style={{position:"relative",flexShrink:0}}>
+    <button onClick={()=>setOpen(o=>!o)} style={{background:"none",border:"none",cursor:"pointer",padding:"4px",color:T.text3,borderRadius:8,display:"flex",alignItems:"center",justifyContent:"center",width:32,height:32}}>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>
+    </button>
+    {open&&<div style={{position:"absolute",right:0,top:"calc(100% + 4px)",background:T.bg1,borderRadius:14,boxShadow:T.shadowMd,minWidth:160,zIndex:100,overflow:"hidden"}}>
+      {[
+        {label:"Edit unit",icon:"✏️",action:()=>{onEdit(unit);setOpen(false);}},
+        {label:"Duplicate",icon:"📋",action:()=>{onDupe(unit);setOpen(false);}},
+        {label:"Split group",icon:"⚡",action:()=>{onSplit(unit);setOpen(false);}},
+        {label:"Delete",icon:"🗑",action:()=>{onDelete(unit.id);setOpen(false);},del:true},
+      ].map((item,i)=><button key={i} onClick={item.action} style={{width:"100%",background:"none",border:"none",padding:"12px 16px",display:"flex",alignItems:"center",gap:10,cursor:"pointer",textAlign:"left",fontFamily:"inherit",fontSize:14,color:item.del?T.red:T.text,fontWeight:500,borderBottom:i<3?"1px solid "+T.border:"none"}}>
+        <span style={{fontSize:16,width:20,flexShrink:0}}>{item.icon}</span>{item.label}
+      </button>)}
+    </div>}
+  </div>;
+}
+
+function UnitCard({unit,onEdit,onDelete,onStatus,onSplit,onDupe,onUpdateSubgroups}){
   const next=()=>{const i=SCYCLE.indexOf(unit.status);return SCYCLE[(i+1)%SCYCLE.length];};
   const ph=safeP(unit);
   const shots=[{k:"before",l:"Before",v:ph.before},{k:"wip",l:"WIP",v:ph.wip},{k:"after",l:"After",v:ph.after}].filter(s=>s.v);
-  return <div style={{background:T.bg1,border:"1px solid "+T.border,borderRadius:14,padding:"13px 15px",marginBottom:9}}>
-    {shots.length>0&&<div style={{display:"flex",gap:4,marginBottom:10}}>{shots.map(s=><div key={s.k} style={{position:"relative",flexShrink:0}}><img src={s.v} alt={s.l} style={{width:60,height:60,objectFit:"cover",borderRadius:10,border:"1px solid "+T.border,display:"block"}}/><div style={{position:"absolute",bottom:2,left:2,background:"rgba(0,0,0,0.55)",borderRadius:3,padding:"1px 4px",fontSize:9,color:"#fff",fontWeight:700}}>{s.l}</div></div>)}</div>}
-    <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:6,marginBottom:8}}>
-      <div style={{fontWeight:800,fontSize:14,color:T.text}}>{unit.name}</div>
-      <div style={{display:"flex",gap:4,flexShrink:0}}><Btn sm v="blue" onClick={()=>onSplit(unit)}>Split</Btn><Btn sm v="ok" onClick={()=>onDupe(unit)}>Dupe</Btn><Btn sm v="sec" onClick={()=>onEdit(unit)}>Edit</Btn><Btn sm v="del" onClick={()=>onDelete(unit.id)}>x</Btn></div>
+  return <div style={{background:T.bg1,borderRadius:16,padding:"14px 16px",marginBottom:10,boxShadow:T.shadow}}>
+    {shots.length>0&&<div style={{display:"flex",gap:6,marginBottom:12}}>
+      {shots.map(s=><div key={s.k} style={{position:"relative",flexShrink:0}}>
+        <img src={s.v} alt={s.l} style={{width:64,height:64,objectFit:"cover",borderRadius:10,display:"block"}}/>
+        <div style={{position:"absolute",bottom:3,left:3,background:"rgba(0,0,0,0.6)",borderRadius:4,padding:"2px 5px",fontSize:9,color:"#fff",fontWeight:600,letterSpacing:"0.04em"}}>{s.l}</div>
+      </div>)}
+    </div>}
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8,marginBottom:10}}>
+      <div style={{flex:1,minWidth:0}}>
+        <div style={{fontWeight:700,fontSize:16,color:T.text,lineHeight:1.2,marginBottom:2,letterSpacing:"-0.01em"}}>{unit.name}</div>
+        <div style={{fontSize:13,color:T.text3}}>{unit.models} model{unit.models!==1?"s":""}</div>
+      </div>
+      <UnitCardMenu unit={unit} onEdit={onEdit} onDelete={onDelete} onSplit={onSplit} onDupe={onDupe}/>
     </div>
-    <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
-      <button onClick={()=>onStatus(unit.id,next())} style={{background:"none",border:"none",padding:0,cursor:"pointer"}}><Badge status={unit.status}/></button>
-      <span style={{fontSize:13,color:T.text2}}><span style={{color:T.accent,fontWeight:700}}>{unit.models}</span> model{unit.models!==1?"s":""}</span>
-      <span style={{fontSize:11,color:T.text3,fontStyle:"italic"}}>tap badge to cycle</span>
+    <div style={{display:"flex",alignItems:"center",gap:8}}>
+      <button onClick={()=>onStatus(unit.id,next())} style={{background:"none",border:"none",padding:0,cursor:"pointer",flexShrink:0}}><Badge status={unit.status}/></button>
+      <span style={{fontSize:12,color:T.text3}}>Tap to update</span>
     </div>
-    {unit.subgroups&&unit.subgroups.length>0&&<div style={{marginTop:8}}>{unit.subgroups.map((sg,i)=><div key={i} style={{display:"flex",alignItems:"center",gap:8,marginBottom:4,paddingLeft:8,borderLeft:"2px solid "+(SC[sg.status]?SC[sg.status].color+"50":T.border)}}><span style={{fontSize:11,color:T.text3}}>{sg.models}x</span><Badge status={sg.status}/></div>)}</div>}
+    {unit.subgroups&&unit.subgroups.length>0&&<div style={{marginTop:8,borderTop:"1px solid "+T.border,paddingTop:8}}>
+      <div style={{fontSize:11,color:T.text3,fontWeight:700,textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:6}}>Groups — tap badge to update, x to remove</div>
+      {unit.subgroups.map((sg,i)=>{
+        const nextSt=()=>{const idx=SCYCLE.indexOf(sg.status);return SCYCLE[(idx+1)%SCYCLE.length];};
+        return <div key={i} style={{display:"flex",alignItems:"center",gap:8,marginBottom:6,paddingLeft:8,borderLeft:"3px solid "+(SC[sg.status]?SC[sg.status].color:T.border)}}>
+          <span style={{fontSize:13,fontWeight:700,color:T.text,minWidth:24}}>{sg.models}x</span>
+          <button onClick={()=>{const sgs=unit.subgroups.map((s,j)=>j===i?{...s,status:nextSt()}:s);onStatus&&onUpdateSubgroups(unit.id,sgs);}} style={{background:"none",border:"none",padding:0,cursor:"pointer"}}><Badge status={sg.status}/></button>
+          <button onClick={()=>{const sgs=unit.subgroups.filter((_,j)=>j!==i);onUpdateSubgroups(unit.id,sgs.length?sgs:null);}} style={{background:"none",border:"none",color:T.text3,cursor:"pointer",fontSize:16,marginLeft:"auto",padding:"2px 6px"}}>x</button>
+        </div>;
+      })}
+    </div>}
     {unit.notes&&<div style={{marginTop:8,fontSize:12,color:T.text2,lineHeight:1.55,borderLeft:"2px solid "+T.border,paddingLeft:8,whiteSpace:"pre-wrap"}}>{unit.notes}</div>}
   </div>;
 }
 
 function SplitModal({unit,onSave,onClose}){
-  const [count,setCount]=useState(Math.floor(unit.models/2));
+  const [countStr,setCountStr]=useState(String(Math.floor(unit.models/2)));
   const [stat,setStat]=useState("built");
+  const count=parseInt(countStr)||0;
   const rem=unit.models-count;
-  function save(){if(count<1||count>=unit.models)return;const sgs=[...(unit.subgroups||[]),{models:count,status:stat},{models:rem,status:unit.status}];onSave({...unit,subgroups:sgs});onClose();}
+  const valid=count>=1&&count<unit.models;
+  function save(){
+    if(!valid)return;
+    // Replace subgroups entirely with a fresh split - cleaner than appending
+    const sgs=[{id:nid(),models:count,status:stat},{id:nid(),models:rem,status:unit.status}];
+    onSave({...unit,subgroups:sgs});
+    onClose();
+  }
   return <Modal title={"Split: "+unit.name} onClose={onClose}>
-    <div style={{background:T.bg2,borderRadius:10,padding:"12px",marginBottom:14,fontSize:13,color:T.text2,lineHeight:1.6}}>Split into two groups with different statuses.</div>
-    <Inp label={"Models in first group (of "+unit.models+")"} type="number" min={1} max={unit.models-1} value={count} onChange={e=>setCount(Math.max(1,Math.min(unit.models-1,parseInt(e.target.value)||1)))}/>
-    <Sel label="Status for first group" value={stat} onChange={e=>setStat(e.target.value)}>{Object.entries(SC).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}</Sel>
-    <div style={{background:T.bg2,borderRadius:10,padding:"10px 12px",marginBottom:14,fontSize:13}}>
-      <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}><span style={{color:T.text2}}>Group 1:</span><span style={{fontWeight:700,color:SC[stat]?SC[stat].color:T.text}}>{count}x {SC[stat]?SC[stat].label:stat}</span></div>
-      <div style={{display:"flex",justifyContent:"space-between"}}><span style={{color:T.text2}}>Group 2:</span><span style={{fontWeight:700,color:SC[unit.status]?SC[unit.status].color:T.text}}>{rem}x {SC[unit.status]?SC[unit.status].label:unit.status}</span></div>
+    <div style={{background:T.bg2,borderRadius:10,padding:"12px",marginBottom:14,fontSize:13,color:T.text2,lineHeight:1.6}}>
+      Split this unit into two groups with different statuses — e.g. 3 Painted and 7 Built.
     </div>
-    <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}><Btn v="sec" sm onClick={onClose}>Cancel</Btn><Btn sm onClick={save}>Split</Btn></div>
+    <Field label={"Models in first group (of "+unit.models+")"}>
+      <input
+        type="number" min={1} max={unit.models-1}
+        value={countStr}
+        onChange={e=>setCountStr(e.target.value)}
+        onBlur={e=>{const v=parseInt(e.target.value);if(!v||v<1)setCountStr("1");else if(v>=unit.models)setCountStr(String(unit.models-1));else setCountStr(String(v));}}
+        style={{...IS,fontSize:16}}
+      />
+    </Field>
+    <Sel label="Status for first group" value={stat} onChange={e=>setStat(e.target.value)}>
+      {Object.entries(SC).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
+    </Sel>
+    <div style={{background:T.bg2,borderRadius:10,padding:"10px 12px",marginBottom:14,fontSize:13}}>
+      <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}><span style={{color:T.text2}}>Group 1:</span><span style={{fontWeight:700,color:SC[stat]?SC[stat].color:T.text}}>{valid?count:"?"}x {SC[stat]?SC[stat].label:stat}</span></div>
+      <div style={{display:"flex",justifyContent:"space-between"}}><span style={{color:T.text2}}>Group 2:</span><span style={{fontWeight:700,color:SC[unit.status]?SC[unit.status].color:T.text}}>{valid?rem:"?"}x {SC[unit.status]?SC[unit.status].label:unit.status}</span></div>
+    </div>
+    {!valid&&<div style={{fontSize:12,color:T.red,marginBottom:12}}>Enter a number between 1 and {unit.models-1}.</div>}
+    <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}><Btn v="sec" sm onClick={onClose}>Cancel</Btn><Btn sm onClick={save} disabled={!valid} sx={{opacity:valid?1:0.4}}>Split</Btn></div>
   </Modal>;
 }
 
@@ -318,12 +431,12 @@ function Account({sess,status,err,onOut,onClose}){
   const lbl={idle:"Not synced",syncing:"Syncing...",synced:"Synced",error:"Sync error"}[status]||"";
   return <div style={{minHeight:"100dvh",background:T.bg0,fontFamily:"inherit",display:"flex",flexDirection:"column"}}>
     <div style={{borderBottom:"1px solid "+T.border,padding:"calc(14px + env(safe-area-inset-top)) 15px 13px",display:"flex",alignItems:"center",gap:10,background:T.bg1}}>
-      <button onClick={onClose} style={{background:"none",border:"none",color:T.text2,cursor:"pointer",fontSize:20,width:36,height:36,display:"flex",alignItems:"center",justifyContent:"center",borderRadius:10}}>back</button>
+      <button onClick={onClose} style={{background:"none",border:"none",color:T.text2,cursor:"pointer",fontSize:20,width:36,height:36,display:"flex",alignItems:"center",justifyContent:"center",borderRadius:10}}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg></button>
       <div style={{flex:1}}><div style={{fontSize:11,fontWeight:800,color:T.text3,letterSpacing:"0.10em",textTransform:"uppercase"}}>TABLETOP READY</div><h1 style={{margin:0,fontSize:16,fontWeight:800,color:T.text}}>Account</h1></div>
     </div>
     <div style={{flex:1,padding:"16px 15px",maxWidth:680,margin:"0 auto",width:"100%"}}>
-      <div style={{background:T.bg1,border:"1px solid "+T.border,borderRadius:14,padding:"16px",marginBottom:14}}><div style={{fontSize:11,color:T.text3,letterSpacing:"0.06em",textTransform:"uppercase",fontWeight:700,marginBottom:8}}>Signed in as</div><div style={{fontSize:15,fontWeight:700,color:T.text}}>{sess?sess.email:"Unknown"}</div></div>
-      <div style={{background:T.bg1,border:"1px solid "+T.border,borderRadius:14,padding:"16px",marginBottom:14,display:"flex",justifyContent:"space-between",alignItems:"center"}}><div><div style={{fontSize:11,color:T.text3,letterSpacing:"0.06em",textTransform:"uppercase",fontWeight:700,marginBottom:4}}>Cloud Sync</div><div style={{fontSize:13,color:T.text2}}>Stored privately in your Google Drive.</div></div><div style={{display:"flex",alignItems:"center",gap:6,flexShrink:0,marginLeft:10}}><div style={{width:8,height:8,borderRadius:"50%",background:dot}}/><span style={{fontSize:13,fontWeight:700,color:dot}}>{lbl}</span></div></div>
+      <div style={{background:"#fff",borderRadius:16,padding:"16px",marginBottom:14,boxShadow:T.shadow}}><div style={{fontSize:11,color:T.text3,letterSpacing:"0.06em",textTransform:"uppercase",fontWeight:700,marginBottom:8}}>Signed in as</div><div style={{fontSize:15,fontWeight:700,color:T.text}}>{sess?sess.email:"Unknown"}</div></div>
+      <div style={{background:"#fff",borderRadius:16,padding:"16px",marginBottom:14,boxShadow:T.shadow,display:"flex",justifyContent:"space-between",alignItems:"center"}}><div><div style={{fontSize:11,color:T.text3,letterSpacing:"0.06em",textTransform:"uppercase",fontWeight:700,marginBottom:4}}>Cloud Sync</div><div style={{fontSize:13,color:T.text2}}>Stored privately in your Google Drive.</div></div><div style={{display:"flex",alignItems:"center",gap:6,flexShrink:0,marginLeft:10}}><div style={{width:8,height:8,borderRadius:"50%",background:dot}}/><span style={{fontSize:13,fontWeight:700,color:dot}}>{lbl}</span></div></div>
       {err&&<div style={{background:T.red+"10",border:"1px solid "+T.red+"25",borderRadius:10,padding:"12px 14px",marginBottom:14,fontSize:12,color:T.red}}>{err}</div>}
       <div style={{background:T.blue+"10",border:"1px solid "+T.blue+"25",borderRadius:10,padding:"12px 14px",marginBottom:20,fontSize:13,color:T.text2,lineHeight:1.7}}>Sign in with the same Google account on another device to sync your data.</div>
       <Btn v="del" onClick={onOut} sx={{width:"100%"}}>Sign Out</Btn>
@@ -331,7 +444,7 @@ function Account({sess,status,err,onOut,onClose}){
   </div>;
 }
 
-function PaintLibrary({paints,addP,delP,togP,onClose}){
+function PaintLibrary({paints,addP,delP,togP,onClose,onNav}){
   const [form,setForm]=useState({brand:"",type:"",name:"",owned:true});
   const [search,setSearch]=useState("");
   const [showBuy,setShowBuy]=useState(false);
@@ -341,21 +454,29 @@ function PaintLibrary({paints,addP,delP,togP,onClose}){
   function save(){if(!form.name.trim())return;addP({...form,name:form.name.trim()});setForm(f=>({...f,name:""}));}
   return <div style={{minHeight:"100dvh",background:T.bg0,fontFamily:"inherit",display:"flex",flexDirection:"column"}}>
     <div style={{borderBottom:"1px solid "+T.border,padding:"calc(14px + env(safe-area-inset-top)) 15px 13px",display:"flex",alignItems:"center",gap:10,background:T.bg1,position:"sticky",top:0,zIndex:50}}>
-      <button onClick={onClose} style={{background:"none",border:"none",color:T.text2,cursor:"pointer",fontSize:20,width:36,height:36,display:"flex",alignItems:"center",justifyContent:"center",borderRadius:10}}>back</button>
+      <button onClick={onClose} style={{background:"none",border:"none",color:T.text2,cursor:"pointer",fontSize:20,width:36,height:36,display:"flex",alignItems:"center",justifyContent:"center",borderRadius:10}}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg></button>
       <div style={{flex:1}}><div style={{fontSize:11,fontWeight:800,color:T.text3,letterSpacing:"0.10em",textTransform:"uppercase"}}>TABLETOP READY</div><h1 style={{margin:0,fontSize:16,fontWeight:800,color:T.text}}>🎨 Paint Library</h1></div>
       <span style={{fontSize:13,color:T.text3}}>{paints.length} paints</span>
     </div>
     <div style={{flex:1,overflowY:"auto",padding:"12px 15px",maxWidth:680,margin:"0 auto",width:"100%",paddingBottom:"24px"}}>
       {needCount>0&&<div style={{background:T.red+"10",border:"1px solid "+T.red+"25",borderRadius:10,padding:"10px 14px",marginBottom:14,display:"flex",justifyContent:"space-between",alignItems:"center"}}><span style={{fontSize:13,color:T.red}}>{needCount} paint{needCount!==1?"s":""} to buy</span><Btn sm v="sec" onClick={()=>setShowBuy(n=>!n)}>{showBuy?"Show all":"Shopping list"}</Btn></div>}
-      <div style={{background:T.bg1,border:"1px solid "+T.border,borderRadius:14,padding:"14px",marginBottom:16}}>
+      <div style={{background:"#fff",borderRadius:18,padding:"16px",marginBottom:16,boxShadow:T.shadow}}>
         <div style={{fontSize:11,color:T.text3,fontWeight:700,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:10}}>Add Paint</div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}><Inp label="Brand" mb={0} placeholder="Citadel..." value={form.brand} onChange={e=>setForm(f=>({...f,brand:e.target.value}))}/><Inp label="Type" mb={0} placeholder="Base, Shade..." value={form.type} onChange={e=>setForm(f=>({...f,type:e.target.value}))}/></div>
         <div style={{display:"flex",gap:8,alignItems:"flex-end",marginBottom:8}}><Inp label="Name" mb={0} placeholder="e.g. Macragge Blue" value={form.name} onChange={e=>setForm(f=>({...f,name:e.target.value}))} style={{flex:1}} onKeyDown={e=>e.key==="Enter"&&save()}/><Btn sm onClick={save} sx={{flexShrink:0,height:38}}>Add</Btn></div>
         <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:13,color:T.text2}}><input type="checkbox" checked={form.owned} onChange={e=>setForm(f=>({...f,owned:e.target.checked}))} style={{width:16,height:16,accentColor:T.accent}}/>I own this paint</label>
       </div>
       <div style={{position:"relative",marginBottom:14}}><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search paints..." style={{...IS,paddingLeft:30}}/>{search&&<button onClick={()=>setSearch("")} style={{position:"absolute",right:8,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",color:T.text3,cursor:"pointer",fontSize:18}}>x</button>}</div>
-      {Object.entries(grouped).map(([brand,types])=><div key={brand} style={{marginBottom:12}}><div style={{fontSize:12,color:T.accent,fontWeight:800,letterSpacing:"0.06em",textTransform:"uppercase",marginBottom:6}}>{brand}</div>{Object.entries(types).map(([type,ps])=><div key={type} style={{background:T.bg1,border:"1px solid "+T.border,borderRadius:12,marginBottom:6,overflow:"hidden"}}><div style={{padding:"6px 12px",fontSize:11,color:T.text3,fontWeight:700,letterSpacing:"0.06em",textTransform:"uppercase",background:T.bg2,borderBottom:"1px solid "+T.border}}>{type}</div>{ps.map(p=><div key={p.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"9px 12px",borderBottom:"1px solid "+T.border}}><div style={{display:"flex",alignItems:"center",gap:10}}><button onClick={()=>togP(p.id)} style={{background:"none",border:"none",cursor:"pointer",fontSize:16,padding:0,width:24,height:24,flexShrink:0}}>{p.owned?"✅":"○"}</button><span style={{fontSize:13,color:p.owned?T.text:T.text3}}>{p.name}</span></div><button onClick={()=>delP(p.id)} style={{background:"none",border:"none",color:T.text3,cursor:"pointer",fontSize:16,padding:0,width:28,height:28,display:"flex",alignItems:"center",justifyContent:"center"}}>x</button></div>)}</div>)}</div>)}
+      {Object.entries(grouped).map(([brand,types])=><div key={brand} style={{marginBottom:12}}><div style={{fontSize:12,color:T.accent,fontWeight:800,letterSpacing:"0.06em",textTransform:"uppercase",marginBottom:6}}>{brand}</div>{Object.entries(types).map(([type,ps])=><div key={type} style={{background:"#fff",borderRadius:14,marginBottom:8,boxShadow:T.shadow,overflow:"hidden"}}><div style={{padding:"6px 12px",fontSize:11,color:T.text3,fontWeight:700,letterSpacing:"0.06em",textTransform:"uppercase",background:T.bg2,borderBottom:"1px solid "+T.border}}>{type}</div>{ps.map(p=><div key={p.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"9px 12px",borderBottom:"1px solid "+T.border}}><div style={{display:"flex",alignItems:"center",gap:10}}><button onClick={()=>togP(p.id)} style={{background:"none",border:"none",cursor:"pointer",fontSize:16,padding:0,width:24,height:24,flexShrink:0}}>{p.owned?"✅":"○"}</button><span style={{fontSize:13,color:p.owned?T.text:T.text3}}>{p.name}</span></div><button onClick={()=>delP(p.id)} style={{background:"none",border:"none",color:T.text3,cursor:"pointer",fontSize:16,padding:0,width:28,height:28,display:"flex",alignItems:"center",justifyContent:"center"}}>x</button></div>)}</div>)}</div>)}
       {filtered.length===0&&<div style={{textAlign:"center",color:T.text3,padding:"40px 0",fontSize:13}}>{search||showBuy?"No paints match.":"No paints yet!"}</div>}
+    </div>
+    {/* Bottom nav */}
+    <div style={{position:"fixed",bottom:0,left:0,right:0,background:"#fff",borderTop:"1px solid "+T.border,display:"flex",zIndex:100,paddingBottom:"env(safe-area-inset-bottom)"}}>
+      {[{id:"dashboard",icon:"📊",label:"Dashboard"},{id:"projects",icon:"⚔️",label:"Projects"},{id:"following",icon:"👥",label:"Following"},{id:"paints",icon:"🎨",label:"Paints"}].map(({id,icon,label})=><button key={id} onClick={()=>onClose(id)} style={{flex:1,padding:"10px 4px 9px",background:"none",border:"none",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:3,opacity:id==="paints"?1:0.45}}>
+        <span style={{fontSize:18}}>{icon}</span>
+        <span style={{fontSize:9,fontWeight:700,letterSpacing:"0.06em",textTransform:"uppercase",color:id==="paints"?T.accent:T.text3,fontFamily:"inherit"}}>{label}</span>
+        {id==="paints"&&<div style={{width:18,height:2,borderRadius:1,background:T.accent,marginTop:1}}/>}
+      </button>)}
     </div>
   </div>;
 }
@@ -365,7 +486,7 @@ function ShoppingList({data,paints,onClose}){
   const grouped=useMemo(()=>{const g={};needed.forEach(p=>{const k=p.brand||"Unknown Brand";if(!g[k])g[k]=[];g[k].push(p);});return g;},[needed]);
   return <div style={{minHeight:"100dvh",background:T.bg0,fontFamily:"inherit",display:"flex",flexDirection:"column"}}>
     <div style={{borderBottom:"1px solid "+T.border,padding:"calc(14px + env(safe-area-inset-top)) 15px 13px",display:"flex",alignItems:"center",gap:10,background:T.bg1,position:"sticky",top:0,zIndex:50}}>
-      <button onClick={onClose} style={{background:"none",border:"none",color:T.text2,cursor:"pointer",fontSize:20,width:36,height:36,display:"flex",alignItems:"center",justifyContent:"center",borderRadius:10}}>back</button>
+      <button onClick={onClose} style={{background:"none",border:"none",color:T.text2,cursor:"pointer",fontSize:20,width:36,height:36,display:"flex",alignItems:"center",justifyContent:"center",borderRadius:10}}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg></button>
       <div style={{flex:1}}><div style={{fontSize:11,fontWeight:800,color:T.text3,letterSpacing:"0.10em",textTransform:"uppercase"}}>TABLETOP READY</div><h1 style={{margin:0,fontSize:16,fontWeight:800,color:T.text}}>Shopping List</h1></div>
       <span style={{fontSize:13,color:T.red,fontWeight:700}}>{needed.length} paints</span>
     </div>
@@ -387,7 +508,7 @@ function ActivityChart({log}){
   const months=useMemo(()=>{const now=new Date();const counts={};const order=[];for(let i=5;i>=0;i--){const d=new Date(now.getFullYear(),now.getMonth()-i,1);const key=d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");counts[key]=0;order.push({key,label:MONTHS[d.getMonth()]});}log.filter(e=>e.toStatus==="painted").forEach(e=>{const k=e.date.slice(0,7);if(counts[k]!==undefined)counts[k]+=e.count;});return order.map(({key,label})=>({label,count:counts[key]}));},[log]);
   const max=Math.max(...months.map(m=>m.count),1);
   return <div style={{background:T.bg1,border:"1px solid "+T.border,borderRadius:14,padding:"16px 18px",marginBottom:14}}>
-    <div style={{fontSize:12,color:T.text3,letterSpacing:"0.05em",textTransform:"uppercase",marginBottom:12,fontWeight:700}}>Models Painted - Last 6 Months</div>
+    <div style={{fontSize:11,color:T.text3,letterSpacing:"0.08em",textTransform:"uppercase",marginBottom:12,fontWeight:600}}>Models Painted - Last 6 Months</div>
     <div style={{display:"flex",gap:6,alignItems:"flex-end",height:60}}>{months.map(({label,count})=><div key={label} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:3}}><div style={{fontSize:10,color:T.text3,fontWeight:700}}>{count||""}</div><div style={{width:"100%",background:count>0?T.accent:T.bg2,borderRadius:4,height:Math.max(4,(count/max)*44)+"px",transition:"height 0.4s"}}/><div style={{fontSize:10,color:T.text3}}>{label}</div></div>)}</div>
     {months.every(m=>m.count===0)&&<div style={{textAlign:"center",fontSize:12,color:T.text3,marginTop:8}}>Update unit statuses to track progress!</div>}
   </div>;
@@ -401,7 +522,7 @@ function HobbyBlocker({data,onGoTo}){
   const proj=pick?data.projects.find(p=>p.id===pick.projectId):null;
   if(!proj)return null;
   const s=getStats(proj);const pct=s.total?Math.round(s.painted/s.total*100):0;
-  return <div style={{background:"linear-gradient(135deg,"+T.accentDim+","+T.bg1+")",border:"1px solid "+T.accent+"30",borderRadius:14,padding:"14px 16px",marginBottom:14}}>
+  return <div style={{background:"linear-gradient(135deg,#5b6af010,#fff 60%)",borderRadius:18,padding:"16px 18px",marginBottom:14,boxShadow:T.shadow}}>
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}><div style={{fontSize:12,color:T.accent,letterSpacing:"0.06em",textTransform:"uppercase",fontWeight:800}}>Today's Pick</div><button onClick={reroll} style={{background:"none",border:"1px solid "+T.border,borderRadius:8,padding:"4px 10px",fontSize:12,color:T.text2,cursor:"pointer",fontFamily:"inherit"}}>Reroll</button></div>
     <div onClick={()=>onGoTo(proj.id)} style={{cursor:"pointer"}}><div style={{fontSize:17,fontWeight:900,color:T.text,marginBottom:2}}>{proj.name}</div>{proj.faction&&<div style={{fontSize:12,color:T.text3,marginBottom:8}}>{proj.faction}</div>}<Bar stats={s}/><div style={{display:"flex",justifyContent:"space-between",marginTop:6,fontSize:12,color:T.text2}}><span>{s.painted}/{s.total} painted ({pct}%)</span><span style={{color:T.accent,fontWeight:700}}>Open</span></div></div>
   </div>;
@@ -413,10 +534,10 @@ function Dashboard({data,log,onGoTo}){
   const dp=g.total?Math.round((g.painted+(g.built||0))/g.total*100):0;
   const ranked=[...data.projects].map(p=>{const s=getStats(p);return{...p,stats:s,pct:s.total?Math.round(s.painted/s.total*100):0};}).sort((a,b)=>b.pct-a.pct);
   const backlog=data.projects.flatMap(p=>p.units.filter(u=>u.status!=="painted").map(u=>({...u,project:p.name})));
-  const card={background:T.bg1,border:"1px solid "+T.border,borderRadius:14,padding:"16px 18px",marginBottom:14};
-  return <div style={{padding:"12px 15px",maxWidth:680,margin:"0 auto",paddingBottom:"calc(80px + env(safe-area-inset-bottom))"}}>
+  const card={background:"#fff",borderRadius:18,padding:"18px 20px",marginBottom:14,boxShadow:T.shadow};
+  return <div style={{padding:"14px 16px",maxWidth:680,margin:"0 auto",paddingBottom:"calc(88px + env(safe-area-inset-bottom))"}}>
     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14,marginTop:6}}>
-      {[{label:"Total Models",val:g.total,color:T.accent},{label:"Painted",val:g.painted,color:T.green},{label:"Projects",val:data.projects.length,color:T.blue},{label:"Recipes",val:data.projects.reduce((a,p)=>a+(p.recipes||[]).length,0),color:T.yellow}].map(({label,val,color})=><div key={label} style={{background:T.bg1,border:"1px solid "+T.border,borderRadius:14,padding:"16px 18px"}}><div style={{fontSize:28,fontWeight:900,color,lineHeight:1}}>{val}</div><div style={{fontSize:11,color:T.text3,marginTop:4,letterSpacing:"0.05em",textTransform:"uppercase"}}>{label}</div></div>)}
+      {[{label:"Total Models",val:g.total,color:T.accent},{label:"Painted",val:g.painted,color:T.green},{label:"Projects",val:data.projects.length,color:T.blue},{label:"Recipes",val:data.projects.reduce((a,p)=>a+(p.recipes||[]).length,0),color:T.yellow}].map(({label,val,color})=><div key={label} style={{background:"#fff",borderRadius:18,padding:"18px",boxShadow:T.shadow}}><div style={{fontSize:30,fontWeight:800,color,lineHeight:1,letterSpacing:"-0.02em"}}>{val}</div><div style={{fontSize:11,color:T.text3,marginTop:4,letterSpacing:"0.05em",textTransform:"uppercase"}}>{label}</div></div>)}
     </div>
     <HobbyBlocker data={data} onGoTo={onGoTo}/>
     <ActivityChart log={log}/>
@@ -428,10 +549,10 @@ function Dashboard({data,log,onGoTo}){
       </div>
     </div>
     <div style={card}>
-      <div style={{fontSize:12,color:T.text3,letterSpacing:"0.05em",textTransform:"uppercase",marginBottom:12,fontWeight:700}}>Paint Progress</div>
+      <div style={{fontSize:11,color:T.text3,letterSpacing:"0.08em",textTransform:"uppercase",marginBottom:12,fontWeight:600}}>Paint Progress</div>
       {[{label:"Painted",pct:pp,color:T.green},{label:"Assembled",pct:dp,color:T.blue}].map(({label,pct,color})=><div key={label} style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}><div style={{fontSize:12,color:T.text2,minWidth:80}}>{label}</div><div style={{flex:1,height:8,borderRadius:6,background:T.bg2,overflow:"hidden"}}><div style={{height:"100%",width:pct+"%",background:color,borderRadius:6,transition:"width 0.5s"}}/></div><div style={{fontSize:13,fontWeight:700,color,minWidth:36,textAlign:"right"}}>{pct}%</div></div>)}
     </div>
-    {ranked.length>0&&<div style={card}><div style={{fontSize:12,color:T.text3,letterSpacing:"0.05em",textTransform:"uppercase",marginBottom:12,fontWeight:700}}>Projects by Completion</div>{ranked.map((p,i)=><div key={p.id} onClick={()=>onGoTo(p.id)} style={{display:"flex",alignItems:"center",gap:10,marginBottom:10,cursor:"pointer"}}><div style={{fontSize:12,color:T.text3,minWidth:20,fontWeight:700}}>#{i+1}</div><div style={{flex:1,minWidth:0}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:4}}><div style={{fontSize:13,fontWeight:700,color:T.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:"70%"}}>{p.name}</div><div style={{fontSize:12,color:T.green,fontWeight:700}}>{p.pct}%</div></div><div style={{display:"flex",gap:4,alignItems:"center"}}><div style={{flex:1,height:4,borderRadius:2,background:T.bg2,overflow:"hidden"}}><div style={{height:"100%",width:p.pct+"%",background:T.green,borderRadius:2}}/></div><div style={{fontSize:11,color:T.text3}}>{p.stats.total} models</div></div></div></div>)}</div>}
+    {ranked.length>0&&<div style={card}><div style={{fontSize:11,color:T.text3,letterSpacing:"0.08em",textTransform:"uppercase",marginBottom:12,fontWeight:600}}>Projects by Completion</div>{ranked.map((p,i)=><div key={p.id} onClick={()=>onGoTo(p.id)} style={{display:"flex",alignItems:"center",gap:10,marginBottom:10,cursor:"pointer"}}><div style={{fontSize:12,color:T.text3,minWidth:20,fontWeight:700}}>#{i+1}</div><div style={{flex:1,minWidth:0}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:4}}><div style={{fontSize:13,fontWeight:700,color:T.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:"70%"}}>{p.name}</div><div style={{fontSize:12,color:T.green,fontWeight:700}}>{p.pct}%</div></div><div style={{display:"flex",gap:4,alignItems:"center"}}><div style={{flex:1,height:4,borderRadius:2,background:T.bg2,overflow:"hidden"}}><div style={{height:"100%",width:p.pct+"%",background:T.green,borderRadius:2}}/></div><div style={{fontSize:11,color:T.text3}}>{p.stats.total} models</div></div></div></div>)}</div>}
     {backlog.length>0&&<div style={card}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}><div style={{fontSize:12,color:T.text3,letterSpacing:"0.05em",textTransform:"uppercase",fontWeight:700}}>Backlog</div><div style={{fontSize:13,color:T.red,fontWeight:700}}>{backlog.reduce((a,u)=>a+u.models,0)} models</div></div>{backlog.slice(0,8).map((u,i)=><div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",paddingBottom:8,marginBottom:8,borderBottom:i<Math.min(backlog.length,8)-1?"1px solid "+T.bg2:"none"}}><div><div style={{fontSize:13,color:T.text,fontWeight:600}}>{u.name}</div><div style={{fontSize:12,color:T.text3,marginTop:2}}>{u.project}</div></div><div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}><Badge status={u.status}/><div style={{fontSize:13,color:T.text2,minWidth:20,textAlign:"right"}}>{u.models}</div></div></div>)}{backlog.length>8&&<div style={{fontSize:12,color:T.text3,textAlign:"center",paddingTop:4}}>+{backlog.length-8} more</div>}</div>}
     {!data.projects.length&&<div style={{textAlign:"center",color:T.text3,padding:"60px 0",fontSize:14,lineHeight:2}}>No data yet.<br/>Head to Projects to get started!</div>}
   </div>;
@@ -483,7 +604,7 @@ function ImportModal({onClose,onImport}){
     {state==="error"&&<div style={{color:T.red,fontSize:13,padding:"14px",background:T.red+"14",borderRadius:10}}>{error}</div>}
     {state==="preview"&&preview&&<>
       <div style={{fontSize:12,color:T.text3,fontWeight:700,textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:10}}>Found {preview.length} project{preview.length!==1?"s":""}</div>
-      {preview.map((p,i)=>{const s=getStats(p);const sel=selected.has(i);return <div key={i} onClick={()=>toggle(i)} style={{background:sel?T.accentDim:T.bg2,border:"1px solid "+(sel?T.accent+"60":T.border),borderRadius:10,padding:"12px 13px",marginBottom:8,cursor:"pointer"}}><div style={{display:"flex",alignItems:"center",gap:10}}><div style={{width:18,height:18,borderRadius:4,border:"2px solid "+(sel?T.accent:T.border2),background:sel?T.accent:"transparent",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,color:"#fff",fontWeight:900,flexShrink:0}}>{sel?"v":""}</div><div style={{flex:1}}><div style={{fontWeight:800,fontSize:14,color:T.text}}>{p.name}</div>{p.faction&&<div style={{fontSize:12,color:T.text3}}>{p.faction}</div>}</div><div style={{textAlign:"right",flexShrink:0}}><div style={{fontWeight:700,color:T.accent,fontSize:16}}>{s.total}</div><div style={{fontSize:11,color:T.text3}}>models</div></div></div><Bar stats={s}/></div>;})}
+      {preview.map((p,i)=>{const s=getStats(p);const sel=selected.has(i);return <div key={i} onClick={()=>toggle(i)} style={{background:sel?T.accentDim:T.bg2,border:"2px solid "+(sel?T.accent:"transparent"),borderRadius:14,padding:"14px",marginBottom:8,cursor:"pointer"}}><div style={{display:"flex",alignItems:"center",gap:10}}><div style={{width:18,height:18,borderRadius:4,border:"2px solid "+(sel?T.accent:T.border2),background:sel?T.accent:"transparent",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,color:"#fff",fontWeight:900,flexShrink:0}}>{sel?"v":""}</div><div style={{flex:1}}><div style={{fontWeight:800,fontSize:14,color:T.text}}>{p.name}</div>{p.faction&&<div style={{fontSize:12,color:T.text3}}>{p.faction}</div>}</div><div style={{textAlign:"right",flexShrink:0}}><div style={{fontWeight:700,color:T.accent,fontSize:16}}>{s.total}</div><div style={{fontSize:11,color:T.text3}}>models</div></div></div><Bar stats={s}/></div>;})}
       <div style={{marginTop:14}}><div style={{...LS,marginBottom:8}}>Import mode</div>{[["add","Add to existing"],["replace","Replace all"]].map(([val,label])=><div key={val} onClick={()=>setMode(val)} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",borderRadius:10,border:"1px solid "+(mode===val?T.accent+"50":T.border),background:mode===val?T.accentDim:"transparent",marginBottom:6,cursor:"pointer"}}><div style={{width:16,height:16,borderRadius:"50%",border:"2px solid "+(mode===val?T.accent:T.border2),background:mode===val?T.accent:"transparent",flexShrink:0}}/><div style={{fontSize:13,color:mode===val?T.text:T.text2}}>{label}</div></div>)}{mode==="replace"&&<div style={{fontSize:12,color:T.red,padding:"8px 10px",background:T.red+"14",borderRadius:8,marginTop:4}}>This will delete all current projects.</div>}</div>
       <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:16}}><Btn v="sec" sm onClick={onClose}>Cancel</Btn><Btn sm onClick={doImport} disabled={selected.size===0} sx={{opacity:selected.size===0?0.4:1}}>Import {selected.size}</Btn></div>
     </>}
@@ -502,11 +623,11 @@ function SharedDB({payload,onBack}){
   const dp=g.total?Math.round((g.painted+(g.built||0))/g.total*100):0;
   const ranked=[...ps].map(p=>({...p,pct:p.stats&&p.stats.total?Math.round(p.stats.painted/p.stats.total*100):0})).sort((a,b)=>b.pct-a.pct);
   const backlog=ps.flatMap(p=>(p.backlog||[]).map(u=>({...u,project:p.name})));
-  const card={background:"#fff",border:"1px solid "+T.border,borderRadius:14,padding:"16px 18px",marginBottom:14};
+  const card={background:"#fff",borderRadius:18,padding:"18px 20px",marginBottom:14,boxShadow:T.shadow};
   return <div style={{minHeight:"100dvh",background:T.bg0,fontFamily:"inherit",color:T.text}}>
     <div style={{background:T.orange+"18",borderBottom:"1px solid "+T.orange+"35",padding:"7px 15px",textAlign:"center",fontSize:12,color:T.orange,fontWeight:700}}>READ-ONLY SHARED DASHBOARD</div>
     <div style={{borderBottom:"1px solid "+T.border,padding:"14px 16px",background:T.bg0,display:"flex",alignItems:"center",gap:10}}>
-      {onBack&&<button onClick={onBack} style={{background:"none",border:"none",color:T.text2,cursor:"pointer",fontSize:20,width:36,height:36,display:"flex",alignItems:"center",justifyContent:"center",borderRadius:10,flexShrink:0}}>back</button>}
+      {onBack&&<button onClick={onBack} style={{background:"none",border:"none",color:T.text2,cursor:"pointer",fontSize:20,width:36,height:36,display:"flex",alignItems:"center",justifyContent:"center",borderRadius:10,flexShrink:0}}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg></button>}
       <div><h1 style={{margin:0,fontSize:16,fontWeight:900,color:T.accent}}>TABLETOP READY</h1><div style={{fontSize:13,color:T.text3,marginTop:2}}>{payload.by?payload.by+" - ":""}{ps.length} project{ps.length!==1?"s":""}</div></div>
     </div>
     <div style={{padding:"12px 15px 40px",maxWidth:680,margin:"0 auto"}}>
@@ -553,13 +674,13 @@ function SharedView({projects,by,onBack,onAdd}){
     return <div style={{minHeight:"100dvh",background:T.bg0,fontFamily:"inherit",color:T.text}}>
       {banner}
       <div style={{borderBottom:"1px solid "+T.border,padding:"12px 15px",display:"flex",alignItems:"center",gap:10,background:T.bg0,position:"sticky",top:0,zIndex:50}}>
-        <button onClick={()=>{setPidx(null);setTab("units");}} style={{background:"none",border:"none",color:T.text2,cursor:"pointer",fontSize:20,width:36,height:36,display:"flex",alignItems:"center",justifyContent:"center",borderRadius:10}}>back</button>
+        <button onClick={()=>{setPidx(null);setTab("units");}} style={{background:"none",border:"none",color:T.text2,cursor:"pointer",fontSize:20,width:36,height:36,display:"flex",alignItems:"center",justifyContent:"center",borderRadius:10}}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg></button>
         <div style={{flex:1,minWidth:0}}>{by&&<div style={{fontSize:11,color:T.text3,fontWeight:700,textTransform:"uppercase",letterSpacing:"0.05em"}}>BY {by.toUpperCase()}</div>}{p.faction&&<div style={{fontSize:13,color:T.text3}}>{p.faction}</div>}<h1 style={{margin:0,fontSize:16,fontWeight:900,color:T.accent,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{p.name}</h1></div>
       </div>
       <div style={{padding:"12px 15px 40px",maxWidth:680,margin:"0 auto"}}>
         <div style={{background:"#fff",border:"1px solid "+T.border,borderRadius:14,padding:"14px",marginBottom:13,marginTop:6}}><div style={{fontSize:11,color:T.text3,fontWeight:700,textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:5}}>{s.total} models - {p.units.length} units - {(p.recipes||[]).length} recipes</div><Bar stats={s}/><div style={{display:"flex",gap:10,flexWrap:"wrap",marginTop:6}}>{Object.entries(SC).map(([k,c])=><div key={k} style={{fontSize:12}}><span style={{color:T.text3}}>{c.label}: </span><span style={{color:c.color,fontWeight:700}}>{s[k]||0}</span></div>)}</div></div>
         <TabBar tabs={[{id:"units",label:"Units ("+p.units.length+")"},{id:"recipes",label:"Recipes ("+(p.recipes||[]).length+")"},{id:"showcase",label:"Showcase"}]} active={tab} onChange={setTab}/>
-        {tab==="units"&&p.units.map(u=>{const ph=safeP(u);const shots=[{k:"before",l:"Before",v:ph.before},{k:"wip",l:"WIP",v:ph.wip},{k:"after",l:"After",v:ph.after}].filter(s=>s.v);return <div key={u.id} style={{background:"#fff",border:"1px solid "+T.border,borderRadius:14,padding:"13px 15px",marginBottom:9}}>{shots.length>0&&<div style={{display:"flex",gap:4,marginBottom:10}}>{shots.map(s=><div key={s.k} style={{position:"relative",flexShrink:0}}><img src={s.v} alt={s.l} style={{width:60,height:60,objectFit:"cover",borderRadius:10,border:"1px solid "+T.border,display:"block"}}/><div style={{position:"absolute",bottom:2,left:2,background:"rgba(0,0,0,0.55)",borderRadius:3,padding:"1px 4px",fontSize:9,color:"#fff",fontWeight:700}}>{s.l}</div></div>)}</div>}<div style={{fontWeight:800,fontSize:14,color:T.text,marginBottom:6}}>{u.name}</div><div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}><Badge status={u.status}/><span style={{fontSize:13,color:T.text2}}><span style={{color:T.accent,fontWeight:700}}>{u.models}</span> model{u.models!==1?"s":""}</span></div>{u.notes&&<div style={{marginTop:8,fontSize:12,color:T.text2,lineHeight:1.55,borderLeft:"2px solid "+T.border,paddingLeft:8,whiteSpace:"pre-wrap"}}>{u.notes}</div>}</div>;})}
+        {tab==="units"&&p.units.map(u=>{const ph=safeP(u);const shots=[{k:"before",l:"Before",v:ph.before},{k:"wip",l:"WIP",v:ph.wip},{k:"after",l:"After",v:ph.after}].filter(s=>s.v);return <div key={u.id} style={{background:"#fff",borderRadius:16,padding:"14px 16px",marginBottom:10,boxShadow:T.shadow}}>{shots.length>0&&<div style={{display:"flex",gap:4,marginBottom:10}}>{shots.map(s=><div key={s.k} style={{position:"relative",flexShrink:0}}><img src={s.v} alt={s.l} style={{width:60,height:60,objectFit:"cover",borderRadius:10,border:"1px solid "+T.border,display:"block"}}/><div style={{position:"absolute",bottom:2,left:2,background:"rgba(0,0,0,0.55)",borderRadius:3,padding:"1px 4px",fontSize:9,color:"#fff",fontWeight:700}}>{s.l}</div></div>)}</div>}<div style={{fontWeight:800,fontSize:14,color:T.text,marginBottom:6}}>{u.name}</div><div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}><Badge status={u.status}/><span style={{fontSize:13,color:T.text2}}><span style={{color:T.accent,fontWeight:700}}>{u.models}</span> model{u.models!==1?"s":""}</span></div>{u.notes&&<div style={{marginTop:8,fontSize:12,color:T.text2,lineHeight:1.55,borderLeft:"2px solid "+T.border,paddingLeft:8,whiteSpace:"pre-wrap"}}>{u.notes}</div>}</div>;})}
         {tab==="recipes"&&(p.recipes||[]).map(r=><RecipeCard key={r.id} recipe={r} readOnly onEdit={()=>{}} onDelete={()=>{}} onPaint={()=>{}}/>)}
         {tab==="showcase"&&<div><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>{shots2.map(({img,lbl,u},i)=><div key={i} style={{borderRadius:14,overflow:"hidden",position:"relative"}}><img src={img} alt={u.name} style={{width:"100%",aspectRatio:"1",objectFit:"cover",display:"block"}}/><div style={{position:"absolute",bottom:0,left:0,right:0,background:"linear-gradient(transparent,rgba(0,0,0,0.75))",padding:"20px 10px 8px"}}><div style={{fontSize:12,fontWeight:800,color:"#fff"}}>{u.name}</div><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:3}}><Badge status={u.status}/><span style={{fontSize:10,color:"rgba(255,255,255,0.7)",background:"rgba(0,0,0,0.4)",borderRadius:4,padding:"2px 5px"}}>{lbl}</span></div></div></div>)}</div>{shots2.length===0&&<div style={{textAlign:"center",color:T.text3,padding:"40px 0",fontSize:13}}>No photos in this project.</div>}</div>}
       </div>
@@ -568,12 +689,12 @@ function SharedView({projects,by,onBack,onAdd}){
   return <div style={{minHeight:"100dvh",background:T.bg0,fontFamily:"inherit",color:T.text}}>
     {banner}
     <div style={{borderBottom:"1px solid "+T.border,padding:"14px 16px",background:T.bg0,display:"flex",alignItems:"center",gap:10}}>
-      {onBack&&<button onClick={onBack} style={{background:"none",border:"none",color:T.text2,cursor:"pointer",fontSize:20,width:36,height:36,display:"flex",alignItems:"center",justifyContent:"center",borderRadius:10,flexShrink:0}}>back</button>}
+      {onBack&&<button onClick={onBack} style={{background:"none",border:"none",color:T.text2,cursor:"pointer",fontSize:20,width:36,height:36,display:"flex",alignItems:"center",justifyContent:"center",borderRadius:10,flexShrink:0}}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg></button>}
       <div><h1 style={{margin:0,fontSize:16,fontWeight:900,color:T.accent}}>TABLETOP READY</h1><div style={{fontSize:13,color:T.text3,marginTop:2}}>{by?by+" - ":""}{projects.length} project{projects.length!==1?"s":""}</div></div>
     </div>
     <div style={{padding:"12px 15px 40px",maxWidth:680,margin:"0 auto"}}>
       {onAdd&&<div style={{background:T.green+"14",border:"1px solid "+T.green+"35",borderRadius:10,padding:"10px 14px",marginBottom:14,display:"flex",justifyContent:"space-between",alignItems:"center"}}><span style={{fontSize:13,color:T.green}}>Add these to your collection?</span><Btn sm v="ok" onClick={()=>onAdd(projects)}>Add to Mine</Btn></div>}
-      {projects.map((p,i)=>{const s=getStats(p);return <div key={i} onClick={()=>setPidx(i)} style={{background:"#fff",border:"1px solid "+T.border,borderRadius:14,padding:"14px 16px",marginBottom:10,cursor:"pointer"}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}><div><div style={{fontWeight:800,fontSize:15,color:T.text}}>{p.name}</div>{p.faction&&<div style={{fontSize:13,color:T.text3,marginTop:2}}>{p.faction}</div>}</div><div style={{textAlign:"right"}}><div style={{fontWeight:700,color:T.accent,fontSize:22,lineHeight:1}}>{s.total}</div><div style={{fontSize:12,color:T.text3}}>models</div></div></div><Bar stats={s}/><div style={{fontSize:12,color:T.text3,marginTop:6}}>{p.units.length} units, {(p.recipes||[]).length} recipes - tap to view</div></div>;})}
+      {projects.map((p,i)=>{const s=getStats(p);return <div key={i} onClick={()=>setPidx(i)} style={{background:"#fff",borderRadius:18,padding:"16px 18px",marginBottom:10,cursor:"pointer",boxShadow:T.shadow}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}><div><div style={{fontWeight:800,fontSize:15,color:T.text}}>{p.name}</div>{p.faction&&<div style={{fontSize:13,color:T.text3,marginTop:2}}>{p.faction}</div>}</div><div style={{textAlign:"right"}}><div style={{fontWeight:700,color:T.accent,fontSize:22,lineHeight:1}}>{s.total}</div><div style={{fontSize:12,color:T.text3}}>models</div></div></div><Bar stats={s}/><div style={{fontSize:12,color:T.text3,marginTop:6}}>{p.units.length} units, {(p.recipes||[]).length} recipes - tap to view</div></div>;})}
     </div>
   </div>;
 }
@@ -601,12 +722,12 @@ function Following({onClose}){
   if(viewing){if(viewing.type==="dashboard")return <SharedDB payload={{...viewing.payload,by:viewing.by}} onBack={()=>setViewing(null)}/>;return <SharedView projects={viewing.projects} by={viewing.by} onBack={()=>setViewing(null)}/>;}
   return <div style={{minHeight:"100dvh",background:T.bg0,fontFamily:"inherit",display:"flex",flexDirection:"column"}}>
     <div style={{borderBottom:"1px solid "+T.border,padding:"calc(14px + env(safe-area-inset-top)) 15px 13px",display:"flex",alignItems:"center",gap:10,background:"#fff",position:"sticky",top:0,zIndex:50}}>
-      <button onClick={onClose} style={{background:"none",border:"none",color:T.text2,cursor:"pointer",fontSize:20,width:36,height:36,display:"flex",alignItems:"center",justifyContent:"center",borderRadius:10}}>back</button>
+      <button onClick={onClose} style={{background:"none",border:"none",color:T.text2,cursor:"pointer",fontSize:20,width:36,height:36,display:"flex",alignItems:"center",justifyContent:"center",borderRadius:10}}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg></button>
       <div style={{flex:1}}><div style={{fontSize:11,fontWeight:800,color:T.text3,letterSpacing:"0.10em",textTransform:"uppercase"}}>TABLETOP READY</div><h1 style={{margin:0,fontSize:16,fontWeight:800,color:T.text}}>Following</h1></div>
       <span style={{fontSize:13,color:T.text3,fontWeight:600}}>{list.length} following</span>
     </div>
     <div style={{flex:1,overflowY:"auto",padding:"12px 15px 40px",maxWidth:680,margin:"0 auto",width:"100%"}}>
-      <div style={{background:"#fff",border:"1px solid "+T.border,borderRadius:14,padding:"16px",marginBottom:16,marginTop:6}}>
+      <div style={{background:"#fff",borderRadius:18,padding:"18px",marginBottom:16,marginTop:6,boxShadow:T.shadow}}>
         <div style={{fontSize:12,color:T.text3,fontWeight:700,textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:10}}>Follow someone</div>
         <div style={{display:"flex",gap:8,alignItems:"flex-start"}}><input value={addUrl} onChange={e=>{setAddUrl(e.target.value);setAddErr("");}} placeholder="Paste a share link here..." style={{...IS,flex:1,fontSize:13}} onKeyDown={e=>e.key==="Enter"&&addFollow()}/><Btn sm onClick={addFollow} sx={{flexShrink:0,height:38}}>Follow</Btn></div>
         {addErr&&<div style={{fontSize:12,color:T.red,marginTop:6}}>{addErr}</div>}
@@ -615,11 +736,19 @@ function Following({onClose}){
       {list.length===0?<div style={{textAlign:"center",padding:"50px 20px",color:T.text3}}><div style={{fontSize:32,marginBottom:12}}>👥</div><div style={{fontSize:15,fontWeight:700,color:T.text,marginBottom:8}}>Not following anyone yet</div><div style={{fontSize:14}}>Paste a friend's share link above.</div></div>:list.map((entry,i)=>{
         const name=entry.by||"Unknown";const col=acolor(name);
         const sub=entry.type==="dashboard"?"Dashboard - "+entry.projectCount+" projects":(entry.projectNames||[]).slice(0,2).join(", ")+(entry.projectNames&&entry.projectNames.length>2?" +more":"");
-        return <div key={i} onClick={()=>open(entry)} style={{background:"#fff",border:"1px solid "+T.border,borderRadius:14,padding:"14px 16px",marginBottom:10,cursor:"pointer",display:"flex",alignItems:"center",gap:12}}>
+        return <div key={i} onClick={()=>open(entry)} style={{background:"#fff",borderRadius:18,padding:"16px",marginBottom:10,cursor:"pointer",display:"flex",alignItems:"center",gap:12,boxShadow:T.shadow}}>
           <div style={{width:44,height:44,borderRadius:"50%",background:col+"20",border:"2px solid "+col+"40",display:"flex",alignItems:"center",justifyContent:"center",fontSize:15,fontWeight:900,color:col,flexShrink:0}}>{initials(name)}</div>
           <div style={{flex:1,minWidth:0}}><div style={{fontSize:15,fontWeight:700,color:T.text}}>{name}</div><div style={{fontSize:12,color:T.text3,marginTop:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{sub}</div><div style={{fontSize:11,color:T.text3,marginTop:2}}>Saved {new Date(entry.ts).toLocaleDateString()}</div></div>
           <div style={{display:"flex",gap:8,alignItems:"center",flexShrink:0}}><span style={{fontSize:12,color:T.accent,fontWeight:700}}>View</span><button onClick={e=>{e.stopPropagation();setList(f=>f.filter(x=>x.url!==entry.url));}} style={{background:"none",border:"1px solid "+T.border,borderRadius:8,padding:"4px 8px",fontSize:12,color:T.text3,cursor:"pointer",fontFamily:"inherit"}}>Remove</button></div>
         </div>;})}
+    </div>
+    {/* Bottom nav */}
+    <div style={{position:"fixed",bottom:0,left:0,right:0,background:"#fff",borderTop:"1px solid "+T.border,display:"flex",zIndex:100,paddingBottom:"env(safe-area-inset-bottom)"}}>
+      {[{id:"dashboard",icon:"📊",label:"Dashboard"},{id:"projects",icon:"⚔️",label:"Projects"},{id:"following",icon:"👥",label:"Following"},{id:"paints",icon:"🎨",label:"Paints"}].map(({id,icon,label})=><button key={id} onClick={()=>onClose(id)} style={{flex:1,padding:"10px 4px 9px",background:"none",border:"none",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:3,opacity:id==="following"?1:0.45}}>
+        <span style={{fontSize:18}}>{icon}</span>
+        <span style={{fontSize:9,fontWeight:700,letterSpacing:"0.06em",textTransform:"uppercase",color:id==="following"?T.accent:T.text3,fontFamily:"inherit"}}>{label}</span>
+        {id==="following"&&<div style={{width:18,height:2,borderRadius:1,background:T.accent,marginTop:1}}/>}
+      </button>)}
     </div>
   </div>;
 }
@@ -627,7 +756,14 @@ function Following({onClose}){
 function App(){
   const {sess,signIn,signOut}=useAuth();
   const [skipLogin,setSkipLogin]=useState(()=>lsGet(SK.skip,false));
-  const [data,setData]=useState(()=>lsGet(SK.data,DEF_DATA));
+  const [data,setData]=useState(()=>{
+    const fresh=lsGet(SK.data,null);
+    if(fresh)return fresh;
+    // Migrate from older ColorQuest / Muster Roll storage keys
+    const old=lsGet("cq-data-v4",null)||lsGet("mr-data-v3",null)||lsGet("cq-data-v3",null);
+    if(old)return old;
+    return DEF_DATA;
+  });
   const {paints,setPaints,addP,delP,togP}=usePaints();
   const {log,setLog,addE}=useLog();
   const [syncSt,setSyncSt]=useState("idle");
@@ -647,6 +783,8 @@ function App(){
   const [search,setSearch]=useState("");
   const [toast,setToast]=useState(null);
   const [showBkp,setShowBkp]=useState(false);
+  const swipeRef=useRef();
+  const swipeStart=useRef(0);
 
   useEffect(()=>{lsSet(SK.data,data);},[data]);
   useEffect(()=>{const last=lsGet(SK.backup,null);if(last){const days=(Date.now()-new Date(last).getTime())/(1000*60*60*24);if(days>=7)setShowBkp(true);}},[]);
@@ -676,6 +814,7 @@ function App(){
   const saveUnit=()=>{mut(ps=>ps.map(p=>p.id===pid?{...p,units:p.units.map(u=>u.id===editTgt?{...u,name:form.name?form.name.trim():u.name,models:parseInt(form.models)||u.models,status:form.status||u.status,notes:form.notes!==undefined?form.notes:u.notes,photos:form.photos!==undefined?form.photos:safeP(u),subgroups:form.subgroups!==undefined?form.subgroups:u.subgroups}:u)}:p));close();};
   const delUnit=id=>mut(ps=>ps.map(p=>p.id===pid?{...p,units:p.units.filter(u=>u.id!==id)}:p));
   const chgStatus=(uid,newSt)=>{const proj=data.projects.find(p=>p.id===pid);const unit=proj&&proj.units.find(u=>u.id===uid);if(unit)addE(proj.name,unit.name,unit.models,unit.status,newSt);mut(ps=>ps.map(p=>p.id===pid?{...p,units:p.units.map(u=>u.id===uid?{...u,status:newSt}:u)}:p));toast2(unit?unit.name+" updated":"Updated");};
+  const updSubgroups=(uid,sgs)=>{mut(ps=>ps.map(p=>p.id===pid?{...p,units:p.units.map(u=>u.id===uid?{...u,subgroups:sgs}:u)}:p));};
   const dupUnit=u=>{const copy={...u,id:nid(),name:u.name+" (copy)",status:"new_in_box",subgroups:null,photos:{before:null,wip:null,after:null}};mut(ps=>ps.map(p=>p.id===pid?{...p,units:[...p.units,copy]}:p));toast2("Duplicated: "+u.name);};
 
   const saveRecipe=recipe=>{if(recMod&&recMod.mode==="add"){const r={...recipe,id:nid()};mut(ps=>ps.map(p=>p.id===pid?{...p,recipes:[...(p.recipes||[]),r]}:p));}else{mut(ps=>ps.map(p=>p.id===pid?{...p,recipes:(p.recipes||[]).map(r=>r.id===recipe.id?recipe:r)}:p));}setRecMod(null);};
@@ -694,9 +833,9 @@ function App(){
 
   if(sess===undefined)return <div style={{minHeight:"100dvh",background:T.bg0,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"inherit"}}><div style={{color:T.accent,fontSize:13,fontWeight:700,letterSpacing:"0.15em"}}>LOADING...</div></div>;
   if(!sess&&!skipLogin)return <Login onSignIn={signIn} onSkip={()=>{lsSet(SK.skip,true);setSkipLogin(true);}}/>;
-  if(screen==="paints")return <PaintLibrary paints={paints} addP={addP} delP={delP} togP={togP} onClose={()=>setScreen("projects")}/>;
+  if(screen==="paints")return <PaintLibrary paints={paints} addP={addP} delP={delP} togP={togP} onClose={id=>setScreen(id&&typeof id==="string"?id:"projects")}/>;
   if(screen==="shopping")return <ShoppingList data={data} paints={paints} onClose={()=>setScreen("projects")}/>;
-  if(screen==="following")return <Following onClose={()=>setScreen("dashboard")}/>;
+  if(screen==="following")return <Following onClose={id=>setScreen(id&&typeof id==="string"?id:"dashboard")}/>;
   if(screen==="account")return <Account sess={sess} status={syncSt} err={syncErr} onOut={()=>{signOut();setSkipLogin(false);lsSet(SK.skip,false);setScreen("dashboard");}} onClose={()=>setScreen("dashboard")}/>;
 
   const menuItems=[];
@@ -710,35 +849,71 @@ function App(){
     {toast&&<div style={{position:"fixed",top:"calc(16px + env(safe-area-inset-top))",left:"50%",transform:"translateX(-50%)",background:"#fff",border:"1px solid "+toast.color+"50",borderRadius:12,padding:"10px 18px",fontSize:13,fontWeight:700,color:toast.color,zIndex:999,boxShadow:"0 8px 32px rgba(0,0,0,0.12)",whiteSpace:"nowrap",pointerEvents:"none"}}>{toast.msg}</div>}
     {!sess&&skipLogin&&<SessionBanner onSignIn={()=>{lsSet(SK.skip,false);setSkipLogin(false);}}/>}
 
-    <div style={{position:"sticky",top:0,zIndex:50,background:"#fff",borderBottom:"1px solid "+T.border,flexShrink:0}}>
-      <div style={{padding:"calc(env(safe-area-inset-top) + 12px) 16px 12px",display:"flex",alignItems:"center",minHeight:52}}>
-        <div style={{width:36,flexShrink:0}}>{screen==="detail"&&<button onClick={()=>{setScreen("projects");setPid(null);setFilter("all");setSearch("");}} style={{background:"none",border:"none",color:T.text2,cursor:"pointer",width:36,height:36,display:"flex",alignItems:"center",justifyContent:"center",borderRadius:10,fontSize:20}}>back</button>}</div>
-        <div style={{flex:1,textAlign:"center",minWidth:0}}>
-          <div style={{fontSize:11,fontWeight:800,color:T.text3,letterSpacing:"0.12em",textTransform:"uppercase",lineHeight:1}}>TABLETOP READY</div>
-          {screen==="detail"&&project&&<div style={{fontSize:16,fontWeight:800,color:T.text,marginTop:2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{project.name}</div>}
-          {screen==="detail"&&project&&project.faction&&<div style={{fontSize:12,color:T.text3,marginTop:1}}>{project.faction}</div>}
+    <div style={{position:"sticky",top:0,zIndex:50,background:"rgba(255,255,255,0.95)",backdropFilter:"blur(12px)",WebkitBackdropFilter:"blur(12px)",borderBottom:"1px solid "+T.border,flexShrink:0}}>
+      <div style={{padding:"calc(env(safe-area-inset-top) + 10px) 16px 10px",display:"flex",alignItems:"center",gap:8,minHeight:50}}>
+        {/* Left: back arrow in detail */}
+        {screen==="detail"
+          ? <button onClick={()=>{setScreen("projects");setPid(null);setFilter("all");setSearch("");}} style={{background:"none",border:"none",color:T.text2,cursor:"pointer",width:34,height:34,display:"flex",alignItems:"center",justifyContent:"center",borderRadius:10,flexShrink:0,marginRight:2}}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+            </button>
+          : <div style={{width:34,flexShrink:0}}/>
+        }
+        {/* Centre: title */}
+        <div style={{flex:1,minWidth:0}}>
+          {screen==="detail"&&project
+            ? <div style={{fontWeight:700,fontSize:17,color:T.text,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",lineHeight:1.2}}>
+                {project.name}
+                {project.faction&&<span style={{fontWeight:400,color:T.text3,fontSize:14}}> · {project.faction}</span>}
+              </div>
+            : <div style={{fontWeight:800,fontSize:16,color:T.text,letterSpacing:"-0.01em"}}>Tabletop Ready</div>
+          }
         </div>
-        <div style={{width:72,flexShrink:0,display:"flex",alignItems:"center",justifyContent:"flex-end",gap:4}}>
-          <button onClick={()=>setScreen("account")} style={{background:"none",border:"none",cursor:"pointer",padding:0,width:32,height:32,display:"flex",alignItems:"center",justifyContent:"center",position:"relative",borderRadius:8}}>
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={T.text2} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
-            <span style={{position:"absolute",top:3,right:3,width:8,height:8,borderRadius:"50%",background:dotC,border:"2px solid #fff",display:"block"}}/>
+        {/* Right: account + menu */}
+        <div style={{display:"flex",alignItems:"center",gap:4,flexShrink:0}}>
+          <button onClick={()=>setScreen("account")} style={{background:"none",border:"none",cursor:"pointer",width:34,height:34,display:"flex",alignItems:"center",justifyContent:"center",position:"relative",borderRadius:10}}>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={T.text2} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
+            {dotC!=="transparent"&&<span style={{position:"absolute",top:5,right:5,width:7,height:7,borderRadius:"50%",background:dotC,border:"2px solid #fff",display:"block"}}/>}
           </button>
           <SettingsMenu items={menuItems} primary={primary}/>
         </div>
       </div>
-      {(screen==="projects"||screen==="detail")&&<div style={{padding:"0 14px 10px"}}><div style={{position:"relative"}}><input value={search} onChange={e=>setSearch(e.target.value)} placeholder={screen==="projects"?"Search projects...":"Search units..."} style={{...IS,paddingLeft:30,paddingTop:"8px",paddingBottom:"8px",borderRadius:10,fontSize:14,background:T.bg2}}/>{search&&<button onClick={()=>setSearch("")} style={{position:"absolute",right:8,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",color:T.text3,cursor:"pointer",fontSize:18,width:28,height:28,display:"flex",alignItems:"center",justifyContent:"center"}}>x</button>}</div></div>}
+      {/* Search bar */}
+      {(screen==="projects"||screen==="detail")&&<div style={{padding:"0 14px 10px"}}>
+        <div style={{position:"relative"}}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={T.text3} strokeWidth="2.5" strokeLinecap="round" style={{position:"absolute",left:12,top:"50%",transform:"translateY(-50%)"}}><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <input value={search} onChange={e=>setSearch(e.target.value)} placeholder={screen==="projects"?"Search projects...":"Search units or notes..."} style={{...IS,paddingLeft:34,paddingTop:"9px",paddingBottom:"9px",background:T.bg2,fontSize:14}}/>
+          {search&&<button onClick={()=>setSearch("")} style={{position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",background:T.border,border:"none",borderRadius:"50%",width:20,height:20,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",color:T.text3,fontSize:12}}>x</button>}
+        </div>
+      </div>}
     </div>
 
     {showBkp&&screen!=="detail"&&<BackupBanner onExport={doBackup} onDismiss={()=>setShowBkp(false)}/>}
 
-    <div style={{flex:1,overflowY:"auto"}}>
+    <div style={{flex:1,overflowY:"auto"}}
+      ref={swipeRef}
+      onTouchStart={e=>{swipeStart.current=e.touches[0].clientX;}}
+      onTouchEnd={e=>{
+        const dx=e.changedTouches[0].clientX-swipeStart.current;
+        if(Math.abs(dx)<60)return;
+        const tabs=["dashboard","projects","following","paints"];
+        const cur=tabs.indexOf(screen===" detail"?"projects":screen);
+        if(cur<0)return;
+        if(dx<0&&cur<tabs.length-1)setScreen(tabs[cur+1]);
+        if(dx>0&&cur>0)setScreen(tabs[cur-1]);
+      }}
+    >
       {screen==="dashboard"&&<Dashboard data={data} log={log} onGoTo={goTo}/>}
 
-      {screen==="projects"&&<div style={{padding:"12px 15px",maxWidth:680,margin:"0 auto",paddingBottom:"calc(80px + env(safe-area-inset-bottom))"}}>
-        {(()=>{const g={new_in_box:0,unbuilt:0,built:0,painted:0,total:0};data.projects.forEach(p=>{const s=getStats(p);Object.keys(g).forEach(k=>g[k]+=(s[k]||0));});return <div style={{background:"#fff",border:"1px solid "+T.border,borderRadius:14,padding:"14px 16px",marginBottom:14,marginTop:6}}><div style={{fontSize:11,color:T.text3,fontWeight:700,textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:7}}>{g.total} models across {data.projects.length} project{data.projects.length!==1?"s":""}</div><Bar stats={g}/><div style={{display:"flex",gap:10,flexWrap:"wrap",marginTop:6}}>{Object.entries(SC).map(([k,c])=><div key={k} style={{fontSize:12}}><span style={{color:T.text3}}>{c.label}: </span><span style={{color:c.color,fontWeight:700}}>{g[k]||0}</span></div>)}</div></div>;})()}
-        {shownProjects.length===0&&<div style={{textAlign:"center",color:T.text3,padding:"50px 0",fontSize:14}}>{search?"No projects match.":"No projects yet!"}</div>}
-        {shownProjects.map(p=>{const s=getStats(p);const complete=s.total>0&&s.painted===s.total;return <div key={p.id} onClick={()=>goTo(p.id)} style={{background:"#fff",border:"1px solid "+T.border,borderRadius:14,padding:"14px 16px",marginBottom:10,cursor:"pointer"}}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}><div style={{flex:1,minWidth:0}}><div style={{display:"flex",alignItems:"center",gap:8}}><div style={{fontWeight:800,fontSize:15,color:T.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{p.name}</div>{complete&&<span style={{fontSize:11,background:T.green+"18",color:T.green,border:"1px solid "+T.green+"30",borderRadius:20,padding:"2px 8px",fontWeight:700,flexShrink:0}}>Complete</span>}</div>{p.faction&&<div style={{fontSize:13,color:T.text3,marginTop:2}}>{p.faction}</div>}</div><div style={{textAlign:"right",flexShrink:0,marginLeft:10}}><div style={{fontWeight:700,color:T.accent,fontSize:22,lineHeight:1}}>{s.total}</div><div style={{fontSize:12,color:T.text3}}>models</div></div></div>
+      {screen==="projects"&&<div style={{padding:"14px 16px",maxWidth:680,margin:"0 auto",paddingBottom:"calc(88px + env(safe-area-inset-bottom))"}}>
+        {(()=>{const g={new_in_box:0,unbuilt:0,built:0,painted:0,total:0};data.projects.forEach(p=>{const s=getStats(p);Object.keys(g).forEach(k=>g[k]+=(s[k]||0));});const pct=g.total?Math.round(g.painted/g.total*100):0;return <div style={{background:"linear-gradient(135deg,#5b6af008,#fff 70%)",borderRadius:18,padding:"16px 18px",marginBottom:14,marginTop:6,boxShadow:T.shadow}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}><div><div style={{fontSize:16,fontWeight:900,color:T.text}}>{g.total} <span style={{fontSize:13,fontWeight:500,color:T.text3}}>models</span></div><div style={{fontSize:12,color:T.text3,marginTop:2}}>{data.projects.length} project{data.projects.length!==1?"s":""}</div></div><div style={{textAlign:"right"}}><div style={{fontSize:22,fontWeight:900,color:T.green}}>{pct}%</div><div style={{fontSize:11,color:T.text3}}>painted</div></div></div><Bar stats={g}/><div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:6}}>{Object.entries(SC).map(([k,sc])=>g[k]>0&&<span key={k} style={{fontSize:12,background:sc.bg,color:sc.color,borderRadius:20,padding:"3px 10px",fontWeight:700}}>{ICONS[k]} {g[k]}</span>)}</div></div>;})()}
+        {shownProjects.length===0&&<div style={{textAlign:"center",padding:"60px 20px"}}>
+      {search
+        ?<><div style={{fontSize:32,marginBottom:12}}>🔍</div><div style={{fontSize:15,fontWeight:600,color:T.text,marginBottom:6}}>No projects match</div><div style={{fontSize:13,color:T.text3}}>Try a different search term</div></>
+        :<><div style={{fontSize:48,marginBottom:16}}>🎨</div><div style={{fontSize:18,fontWeight:700,color:T.text,marginBottom:8}}>Welcome to Tabletop Ready</div><div style={{fontSize:14,color:T.text3,lineHeight:1.6,marginBottom:20}}>Start tracking your hobby progress by adding your first project</div><Btn onClick={()=>{setModal("addProject");setForm({});}}>+ Create First Project</Btn></>
+      }
+    </div>}
+        {shownProjects.map(p=>{const s=getStats(p);const complete=s.total>0&&s.painted===s.total;return <div key={p.id} onClick={()=>goTo(p.id)} style={{background:"#fff",borderRadius:18,padding:"16px 18px",marginBottom:10,cursor:"pointer",boxShadow:T.shadow}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}><div style={{flex:1,minWidth:0}}><div style={{display:"flex",alignItems:"center",gap:8}}><div style={{fontWeight:700,fontSize:16,color:T.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",letterSpacing:"-0.01em"}}>{p.name}</div>{complete&&<span style={{fontSize:11,background:T.green+"18",color:T.green,border:"1px solid "+T.green+"30",borderRadius:20,padding:"2px 8px",fontWeight:700,flexShrink:0}}>Complete</span>}</div>{p.faction&&<div style={{fontSize:13,color:T.text3,marginTop:2}}>{p.faction}</div>}</div><div style={{textAlign:"right",flexShrink:0,marginLeft:10}}><div style={{fontWeight:700,color:T.accent,fontSize:22,lineHeight:1}}>{s.total}</div><div style={{fontSize:12,color:T.text3}}>models</div></div></div>
           <Bar stats={s}/>
           <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:5}}>{Object.entries(SC).map(([k,c])=>s[k]>0&&<span key={k} style={{fontSize:12,color:c.color}}>{ICONS[k]} {s[k]} {c.label}</span>)}</div>
           <div style={{marginTop:6,fontSize:12,color:T.text3}}>{p.units.length} units, {(p.recipes||[]).length} recipes</div>
@@ -746,13 +921,24 @@ function App(){
       </div>}
 
       {screen==="detail"&&project&&<div style={{padding:"12px 15px",maxWidth:680,margin:"0 auto",paddingBottom:"calc(80px + env(safe-area-inset-bottom))"}}>
-        {(()=>{const s=getStats(project);return <div style={{background:"#fff",border:"1px solid "+T.border,borderRadius:14,padding:"14px 16px",marginBottom:13,marginTop:6}}><div style={{fontSize:11,color:T.text3,fontWeight:700,textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:5}}>{s.total} models - {project.units.length} units - {(project.recipes||[]).length} recipes</div><Bar stats={s}/><div style={{display:"flex",gap:10,flexWrap:"wrap",marginTop:6}}>{Object.entries(SC).map(([k,c])=><div key={k} style={{fontSize:12}}><span style={{color:T.text3}}>{c.label}: </span><span style={{color:c.color,fontWeight:700}}>{s[k]||0}</span></div>)}</div></div>;})()}
+        {(()=>{const s=getStats(project);return <div style={{background:"#fff",borderRadius:18,padding:"16px 18px",marginBottom:14,marginTop:6,boxShadow:T.shadow}}><div style={{fontSize:11,color:T.text3,fontWeight:700,textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:5}}>{s.total} models - {project.units.length} units - {(project.recipes||[]).length} recipes</div><Bar stats={s}/><div style={{display:"flex",gap:10,flexWrap:"wrap",marginTop:6}}>{Object.entries(SC).map(([k,c])=><div key={k} style={{fontSize:12}}><span style={{color:T.text3}}>{c.label}: </span><span style={{color:c.color,fontWeight:700}}>{s[k]||0}</span></div>)}</div></div>;})()}
         <TabBar tabs={[{id:"units",label:"Units ("+project.units.length+")"},{id:"recipes",label:"Recipes ("+(project.recipes||[]).length+")"},{id:"showcase",label:"Showcase"}]} active={tab} onChange={setTab}/>
         {tab==="units"&&<>
-          <div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:10}}>{[["all","All"],...Object.entries(SC).map(([k,v])=>[k,v.label])].map(([k,label])=><button key={k} onClick={()=>setFilter(k)} style={{background:filter===k?T.accentDim:"transparent",border:"1px solid "+(filter===k?T.accent:T.border),borderRadius:20,padding:"4px 12px",cursor:"pointer",color:filter===k?T.accent:T.text3,fontSize:11,fontWeight:700,textTransform:"uppercase",fontFamily:"inherit"}}>{label}</button>)}</div>
-          <div style={{fontSize:12,color:T.text3,marginBottom:10}}>Tap status badge to cycle</div>
-          {filteredUnits.length===0&&<div style={{textAlign:"center",color:T.text3,padding:"40px 0",fontSize:14}}>{project.units.length===0?"No units yet.":"No units match."}</div>}
-          {filteredUnits.map(u=><UnitCard key={u.id} unit={u} onEdit={u=>{setEditTgt(u.id);setForm({name:u.name,models:String(u.models),status:u.status,notes:u.notes||"",photos:safeP(u),subgroups:u.subgroups});setModal("editUnit");}} onDelete={delUnit} onStatus={chgStatus} onSplit={u=>setSplitTgt(u)} onDupe={dupUnit}/>)}
+          <div style={{display:"flex",gap:6,marginBottom:12,overflowX:"auto",paddingBottom:2}}>
+            {[["all","All",null],...Object.entries(SC).map(([k,v])=>[k,ICONS[k],v.color])].map(([k,icon,color])=>{
+              const active=filter===k;
+              return <button key={k} onClick={()=>setFilter(k)} style={{flexShrink:0,display:"flex",alignItems:"center",gap:5,background:active?(color?color+"18":T.accentDim):"transparent",border:"1px solid "+(active?(color||T.accent)+"40":T.border),borderRadius:20,padding:"6px 12px",cursor:"pointer",color:active?(color||T.accent):T.text3,fontSize:12,fontWeight:active?700:500,fontFamily:"inherit",whiteSpace:"nowrap"}}>
+                {icon&&<span style={{fontSize:14}}>{icon}</span>}<span>{k==="all"?"All":SC[k].label}</span>
+              </button>;
+            })}
+          </div>
+          {filteredUnits.length===0&&<div style={{textAlign:"center",padding:"48px 20px"}}>
+      {project.units.length===0
+        ?<><div style={{fontSize:40,marginBottom:12}}>⚔️</div><div style={{fontSize:16,fontWeight:600,color:T.text,marginBottom:8}}>No units yet</div><div style={{fontSize:13,color:T.text3,lineHeight:1.6,marginBottom:18}}>Add your first unit to start tracking this project</div><Btn onClick={()=>{setModal("addUnit");setForm({status:"new_in_box",models:"1"});}}>+ Add First Unit</Btn></>
+        :<><div style={{fontSize:32,marginBottom:12}}>🔍</div><div style={{fontSize:15,fontWeight:600,color:T.text,marginBottom:6}}>No units match</div><div style={{fontSize:13,color:T.text3}}>Try a different filter</div></>
+      }
+    </div>}
+          {filteredUnits.map(u=><UnitCard key={u.id} unit={u} onEdit={u=>{setEditTgt(u.id);setForm({name:u.name,models:String(u.models),status:u.status,notes:u.notes||"",photos:safeP(u),subgroups:u.subgroups});setModal("editUnit");}} onDelete={delUnit} onStatus={chgStatus} onSplit={u=>setSplitTgt(u)} onDupe={dupUnit} onUpdateSubgroups={updSubgroups}/>)}
         </>}
         {tab==="recipes"&&<>{(project.recipes||[]).length===0&&<div style={{textAlign:"center",color:T.text3,padding:"40px 0",fontSize:14}}>No recipes yet. Tap + Recipe to add one.</div>}{(project.recipes||[]).map(r=><RecipeCard key={r.id} recipe={r} onEdit={r=>setRecMod({recipe:r,mode:"edit"})} onDelete={delRecipe} onPaint={r=>setPaintMod(r)}/>)}</>}
         {tab==="showcase"&&(()=>{const shots=project.units.flatMap(u=>{const ph=safeP(u);return[{img:ph.after,lbl:"After",u},{img:ph.wip,lbl:"WIP",u},{img:ph.before,lbl:"Before",u}].filter(s=>s.img);});return <div><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>{shots.map(({img,lbl,u},i)=><div key={i} style={{borderRadius:14,overflow:"hidden",position:"relative",border:"1px solid "+T.border}}><img src={img} alt={u.name} style={{width:"100%",aspectRatio:"1",objectFit:"cover",display:"block"}}/><div style={{position:"absolute",bottom:0,left:0,right:0,background:"linear-gradient(transparent,rgba(0,0,0,0.75))",padding:"20px 10px 8px"}}><div style={{fontSize:12,fontWeight:800,color:"#fff"}}>{u.name}</div><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:3}}><Badge status={u.status}/><span style={{fontSize:10,color:"rgba(255,255,255,0.7)",background:"rgba(0,0,0,0.4)",borderRadius:4,padding:"2px 5px"}}>{lbl}</span></div></div></div>)}</div>{shots.length===0&&<div style={{textAlign:"center",color:T.text3,padding:"50px 0",fontSize:13}}>No photos yet.</div>}</div>;})()}
@@ -760,15 +946,19 @@ function App(){
       </div>}
     </div>
 
-    <div style={{position:"fixed",bottom:0,left:0,right:0,background:"#fff",borderTop:"1px solid "+T.border,display:"flex",zIndex:100,paddingBottom:"env(safe-area-inset-bottom)"}}>
-      {[{id:"dashboard",icon:"📊",label:"Dashboard"},{id:"projects",icon:"⚔️",label:"Projects"},{id:"following",icon:"👥",label:"Following"},{id:"paints",icon:"🎨",label:"Paints"}].map(({id,icon,label})=>{
-        const active=screen===id||(screen==="detail"&&id==="projects");
-        return <button key={id} onClick={()=>{if(id==="projects"&&screen==="detail"){setScreen("projects");setPid(null);setFilter("all");setSearch("");}else setScreen(id);}} style={{flex:1,padding:"10px 4px 9px",background:"none",border:"none",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:3,opacity:active?1:0.45}}>
-          <span style={{fontSize:18}}>{icon}</span>
-          <span style={{fontSize:9,fontWeight:700,letterSpacing:"0.06em",textTransform:"uppercase",color:active?T.accent:T.text3,fontFamily:"inherit"}}>{label}</span>
-          {active&&<div style={{width:18,height:2,borderRadius:1,background:T.accent,marginTop:1}}/>}
-        </button>;
-      })}
+    <div style={{position:"fixed",bottom:0,left:0,right:0,background:"rgba(255,255,255,0.95)",backdropFilter:"blur(16px)",WebkitBackdropFilter:"blur(16px)",borderTop:"1px solid "+T.border,zIndex:100,paddingBottom:"env(safe-area-inset-bottom)"}}>
+      <div style={{display:"flex",padding:"6px 8px"}}>
+        {[{id:"dashboard",icon:"📊",label:"Home"},{id:"projects",icon:"⚔️",label:"Projects"},{id:"following",icon:"👥",label:"Following"},{id:"paints",icon:"🎨",label:"Paints"}].map(({id,icon,label})=>{
+          const active=screen===id||(screen==="detail"&&id==="projects");
+          return <button key={id} onClick={()=>{if(id==="projects"&&screen==="detail"){setScreen("projects");setPid(null);setFilter("all");setSearch("");}else setScreen(id);}}
+            style={{flex:1,padding:"8px 4px 6px",background:"none",border:"none",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:2,WebkitTapHighlightColor:"transparent"}}>
+            <div style={{width:44,height:30,borderRadius:20,background:active?T.accentDim:"transparent",display:"flex",alignItems:"center",justifyContent:"center",transition:"background 0.15s"}}>
+              <span style={{fontSize:20}}>{icon}</span>
+            </div>
+            <span style={{fontSize:10,fontWeight:active?700:400,color:active?T.accent:T.text3,fontFamily:"inherit",letterSpacing:"0.01em"}}>{label}</span>
+          </button>;
+        })}
+      </div>
     </div>
 
     {paintMod&&<PaintMode recipe={paintMod} onClose={()=>setPaintMod(null)} paints={paints}/>}
@@ -780,7 +970,12 @@ function App(){
     {modal==="editProject"&&<Modal title="Edit Project" onClose={close}><Inp label="Project Name" value={form.name||""} onChange={e=>sf("name",e.target.value)} autoFocus/><Inp label="Faction / Army" value={form.faction||""} onChange={e=>sf("faction",e.target.value)}/><div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:4}}><Btn v="sec" sm onClick={close}>Cancel</Btn><Btn sm onClick={saveProject}>Save</Btn></div></Modal>}
     {(modal==="addUnit"||modal==="editUnit")&&<Modal title={modal==="addUnit"?"Add Unit":"Edit Unit"} onClose={close} wide>
       <Inp label="Unit Name" placeholder="e.g. Tactical Squad..." value={form.name||""} onChange={e=>sf("name",e.target.value)} autoFocus/>
-      <Inp label="Number of Models" type="number" min="1" value={form.models||"1"} onChange={e=>sf("models",e.target.value)}/>
+      <Field label="Number of Models" mb={13}>
+      <input type="number" min="1" value={form.models!==undefined?form.models:""} 
+        onChange={e=>sf("models",e.target.value)}
+        onBlur={e=>{if(!e.target.value||parseInt(e.target.value)<1)sf("models","1");}}
+        style={{...IS,fontSize:16}}/>
+    </Field>
       <Sel label="Status" value={form.status||"new_in_box"} onChange={e=>sf("status",e.target.value)}>{Object.entries(SC).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}</Sel>
       <Txt label="Notes" placeholder="Assembly notes, colour cues..." value={form.notes||""} onChange={e=>sf("notes",e.target.value)}/>
       <MultiPhoto photos={form.photos||{before:null,wip:null,after:null}} onChange={v=>sf("photos",v)}/>
