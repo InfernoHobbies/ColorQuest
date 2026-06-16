@@ -30,21 +30,23 @@ const {useState,useEffect,useMemo,useRef,useCallback} = React;
 
 const T={bg0:"#f4f5f8",bg1:"#ffffff",bg2:"#f8f9fb",border:"#eceef2",border2:"#dde0e7",text:"#111318",text2:"#4a5568",text3:"#94a3b8",accent:"#5b6af0",accentDim:"rgba(91,106,240,0.08)",accentLight:"rgba(91,106,240,0.15)",green:"#16a34a",greenDim:"rgba(22,163,74,0.10)",blue:"#2563eb",blueDim:"rgba(37,99,235,0.10)",yellow:"#d97706",yellowDim:"rgba(217,119,6,0.10)",orange:"#ea580c",red:"#dc2626",redDim:"rgba(220,38,38,0.10)",shadow:"0 1px 3px rgba(0,0,0,0.06),0 1px 8px rgba(0,0,0,0.04)",shadowMd:"0 4px 16px rgba(0,0,0,0.08),0 1px 4px rgba(0,0,0,0.04)"};
 
-// ── Google OAuth (sign-in only) ──────────────────────────────────────────────
+// ── Google OAuth ──────────────────────────────────────────────────────────────
 const GID="455364707867-m9lpq40cs3kmnirpubdh7sqbrtfpta4m.apps.googleusercontent.com";
 const GSCOPE="https://www.googleapis.com/auth/userinfo.email";
 const TKEY="tr-token";
 
 async function gEmail(tok){try{const r=await fetch("https://www.googleapis.com/oauth2/v2/userinfo",{headers:{Authorization:"Bearer "+tok}});if(!r.ok)return null;const j=await r.json();return j.email||null;}catch(e){return null;}}
 
+// Decode JWT payload without verifying (safe for client-side display only)
+function jwtEmail(idToken){try{const p=idToken.split(".")[1];const j=JSON.parse(atob(p.replace(/-/g,"+").replace(/_/g,"/")));return j.email||null;}catch(e){return null;}}
+
 // ── Supabase client ───────────────────────────────────────────────────────────
 const SB_URL="https://ipyrazhrdvjlmlfyltui.supabase.co";
 const SB_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlweXJhemhyZHZqbG1sZnlsdHVpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEzMjIwOTgsImV4cCI6MjA5Njg5ODA5OH0.OPc_rhdUr3nGRV4RWgzqO8T5mIZg9EEHhmiZX_y8wCM";
 
-// Supabase request helper — attaches auth header using cached Supabase JWT
 let _sbJwt=null;
 let _sbEmail=null;
-// Attach auth headers - uses Supabase JWT if available, falls back to anon key
+
 function sbH(extra){
   return{
     "Content-Type":"application/json",
@@ -53,24 +55,17 @@ function sbH(extra){
     ...extra
   };
 }
-// Set email context when user signs in (used for upserts)
 function sbSetEmail(email){_sbEmail=email;}
 
-// Exchange Google access token for a Supabase JWT (signs user into Supabase Auth)
-async function sbSignIn(googleToken){
+// Exchange Google ID token for a Supabase JWT (enables proper RLS)
+async function sbSignIn(idToken){
   try{
     const r=await fetch(SB_URL+"/auth/v1/token?grant_type=id_token",{
       method:"POST",
       headers:{"Content-Type":"application/json","apikey":SB_KEY},
-      // Supabase accepts Google access tokens via the OpenID provider flow
-      body:JSON.stringify({provider:"google",id_token:googleToken})
+      body:JSON.stringify({provider:"google",id_token:idToken})
     });
-    // Fallback: if id_token flow fails (access token vs id token), use anon key only
-    // and store email as user_id directly — RLS policy uses email match
-    if(!r.ok){
-      // Use Google email as user_id with anon key — works with permissive RLS
-      return {ok:false};
-    }
+    if(!r.ok)return{ok:false};
     const j=await r.json();
     if(j.access_token){_sbJwt=j.access_token;return{ok:true,jwt:j.access_token};}
     return{ok:false};
@@ -193,56 +188,80 @@ function useAuth(){
   const [sess,setSess]=useState(undefined);
   const tcRef=useRef(null);
 
-  // Restore session from localStorage on mount
   useEffect(()=>{
     const s=lsGet(TKEY,null);
-    if(s&&s.expiresAt>Date.now()){setSess({token:s.token,email:s.email});}
-    else{lsSet(TKEY,null);setSess(null);}
+    if(s&&s.expiresAt>Date.now()){
+      if(s.sbJwt){_sbJwt=s.sbJwt;}
+      setSess({token:s.token,email:s.email});
+    } else{lsSet(TKEY,null);setSess(null);}
   },[]);
 
-  // Token expiry check every 30s
   useEffect(()=>{
     const t=setInterval(()=>{
       const s=lsGet(TKEY,null);
-      if(s&&s.expiresAt&&s.expiresAt<Date.now()){lsSet(TKEY,null);setSess(null);}
+      if(s&&s.expiresAt&&s.expiresAt<Date.now()){lsSet(TKEY,null);_sbJwt=null;setSess(null);}
     },30000);
     return()=>clearInterval(t);
   },[]);
 
-  // Init Google OAuth token client (sign-in only, no Drive scope needed)
+  const handleCredential=useCallback(async(idToken)=>{
+    const email=jwtEmail(idToken);
+    if(!email)return;
+    const sb=await sbSignIn(idToken);
+    const exp=Date.now()+3600*1000-60000;
+    lsSet(TKEY,{token:idToken,email,expiresAt:exp,sbJwt:sb.ok?sb.jwt:null});
+    setSess({token:idToken,email});
+    sbSetEmail(email);
+  },[]);
+
   useEffect(()=>{
     let tries=0;
     const init=()=>{
-      if(window.google&&window.google.accounts&&window.google.accounts.oauth2){
-        tcRef.current=window.google.accounts.oauth2.initTokenClient({
+      if(window.google&&window.google.accounts&&window.google.accounts.id){
+        window.google.accounts.id.initialize({
           client_id:GID,
-          scope:GSCOPE,
-          callback:async resp=>{
-            if(resp.error)return;
-            const tok=resp.access_token;
-            const exp=Date.now()+(resp.expires_in||3600)*1000-60000;
-            const email=await gEmail(tok);
-            if(!email)return;
-            // Try to get a Supabase JWT (best case — enables RLS)
-            await sbSignIn(tok);
-            lsSet(TKEY,{token:tok,email,expiresAt:exp});
-            setSess({token:tok,email});sbSetEmail(email);
-          }
+          callback:async resp=>{if(resp.credential)await handleCredential(resp.credential);},
+          auto_select:false,
         });
+        if(window.google.accounts.oauth2){
+          tcRef.current=window.google.accounts.oauth2.initTokenClient({
+            client_id:GID,
+            scope:GSCOPE,
+            callback:async resp=>{
+              if(resp.error)return;
+              const email=await gEmail(resp.access_token);
+              if(!email)return;
+              const exp=Date.now()+(resp.expires_in||3600)*1000-60000;
+              lsSet(TKEY,{token:resp.access_token,email,expiresAt:exp,sbJwt:null});
+              setSess({token:resp.access_token,email});
+              sbSetEmail(email);
+            }
+          });
+        }
       } else if(tries<50){tries++;setTimeout(init,100);}
     };
     init();
+  },[handleCredential]);
+
+  const signIn=useCallback(()=>{
+    if(window.google&&window.google.accounts&&window.google.accounts.id){
+      window.google.accounts.id.prompt(n=>{
+        if(n.isNotDisplayed()||n.isSkippedMoment()){
+          if(tcRef.current)tcRef.current.requestAccessToken({prompt:"consent"});
+        }
+      });
+    } else if(tcRef.current){
+      tcRef.current.requestAccessToken({prompt:"consent"});
+    }
   },[]);
 
-  const signIn=useCallback(()=>{if(tcRef.current)tcRef.current.requestAccessToken({prompt:"consent"});},[]);
   const signOut=useCallback(()=>{
     const s=lsGet(TKEY,null);
-    if(s&&s.token&&window.google&&window.google.accounts&&window.google.accounts.oauth2){
-      window.google.accounts.oauth2.revoke(s.token,()=>{});
+    if(s&&window.google&&window.google.accounts){
+      if(window.google.accounts.id)window.google.accounts.id.disableAutoSelect();
+      if(s.token&&window.google.accounts.oauth2)window.google.accounts.oauth2.revoke(s.token,()=>{});
     }
-    lsSet(TKEY,null);
-    _sbJwt=null;
-    setSess(null);
+    lsSet(TKEY,null);_sbJwt=null;setSess(null);
   },[]);
 
   return{sess,signIn,signOut};
@@ -1179,7 +1198,7 @@ function App(){
         const dx=e.changedTouches[0].clientX-swipeStart.current;
         if(Math.abs(dx)<60)return;
         const tabs=["dashboard","projects","following","paints"];
-        const cur=tabs.indexOf(screen===" detail"?"projects":screen);
+        const cur=tabs.indexOf(screen==="detail"?"projects":screen);
         if(cur<0)return;
         if(dx<0&&cur<tabs.length-1)setScreen(tabs[cur+1]);
         if(dx>0&&cur>0)setScreen(tabs[cur-1]);
