@@ -30,17 +30,133 @@ const {useState,useEffect,useMemo,useRef,useCallback} = React;
 
 const T={bg0:"#f4f5f8",bg1:"#ffffff",bg2:"#f8f9fb",border:"#eceef2",border2:"#dde0e7",text:"#111318",text2:"#4a5568",text3:"#94a3b8",accent:"#5b6af0",accentDim:"rgba(91,106,240,0.08)",accentLight:"rgba(91,106,240,0.15)",green:"#16a34a",greenDim:"rgba(22,163,74,0.10)",blue:"#2563eb",blueDim:"rgba(37,99,235,0.10)",yellow:"#d97706",yellowDim:"rgba(217,119,6,0.10)",orange:"#ea580c",red:"#dc2626",redDim:"rgba(220,38,38,0.10)",shadow:"0 1px 3px rgba(0,0,0,0.06),0 1px 8px rgba(0,0,0,0.04)",shadowMd:"0 4px 16px rgba(0,0,0,0.08),0 1px 4px rgba(0,0,0,0.04)"};
 
+// ── Google OAuth (sign-in only) ──────────────────────────────────────────────
 const GID="455364707867-m9lpq40cs3kmnirpubdh7sqbrtfpta4m.apps.googleusercontent.com";
-const GSCOPE="https://www.googleapis.com/auth/drive.appdata https://www.googleapis.com/auth/userinfo.email";
-const GFILE="tabletop-ready.json";
+const GSCOPE="https://www.googleapis.com/auth/userinfo.email";
 const TKEY="tr-token";
-const DAPI="https://www.googleapis.com/drive/v3";
-const UAPI="https://www.googleapis.com/upload/drive/v3";
 
-async function gFindId(tok){try{const r=await fetch(DAPI+"/files?spaces=appDataFolder&q=name='"+GFILE+"'&fields=files(id)",{headers:{Authorization:"Bearer "+tok}});if(!r.ok)return null;const j=await r.json();return j.files&&j.files.length?j.files[0].id:null;}catch(e){return null;}}
-async function gLoad(tok){try{const id=await gFindId(tok);if(!id)return null;const r=await fetch(DAPI+"/files/"+id+"?alt=media",{headers:{Authorization:"Bearer "+tok}});if(!r.ok)return null;return await r.json();}catch(e){return null;}}
-async function gSave(tok,payload){try{const id=await gFindId(tok);const body=JSON.stringify(payload);if(id){const r=await fetch(UAPI+"/files/"+id+"?uploadType=media",{method:"PATCH",headers:{Authorization:"Bearer "+tok,"Content-Type":"application/json"},body});return r.ok;}const meta={name:GFILE,parents:["appDataFolder"]};const form=new FormData();form.append("metadata",new Blob([JSON.stringify(meta)],{type:"application/json"}));form.append("file",new Blob([body],{type:"application/json"}));const r=await fetch(UAPI+"/files?uploadType=multipart",{method:"POST",headers:{Authorization:"Bearer "+tok},body:form});return r.ok;}catch(e){return false;}}
 async function gEmail(tok){try{const r=await fetch("https://www.googleapis.com/oauth2/v2/userinfo",{headers:{Authorization:"Bearer "+tok}});if(!r.ok)return null;const j=await r.json();return j.email||null;}catch(e){return null;}}
+
+// ── Supabase client ───────────────────────────────────────────────────────────
+const SB_URL="https://ipyrazhrdvjlmlfyltui.supabase.co";
+const SB_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlweXJhemhyZHZqbG1sZnlsdHVpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEzMjIwOTgsImV4cCI6MjA5Njg5ODA5OH0.OPc_rhdUr3nGRV4RWgzqO8T5mIZg9EEHhmiZX_y8wCM";
+
+// Supabase request helper — attaches auth header using cached Supabase JWT
+let _sbJwt=null;
+let _sbEmail=null;
+// Attach auth headers - uses Supabase JWT if available, falls back to anon key
+function sbH(extra){
+  return{
+    "Content-Type":"application/json",
+    "apikey":SB_KEY,
+    "Authorization":"Bearer "+(_sbJwt||SB_KEY),
+    ...extra
+  };
+}
+// Set email context when user signs in (used for upserts)
+function sbSetEmail(email){_sbEmail=email;}
+
+// Exchange Google access token for a Supabase JWT (signs user into Supabase Auth)
+async function sbSignIn(googleToken){
+  try{
+    const r=await fetch(SB_URL+"/auth/v1/token?grant_type=id_token",{
+      method:"POST",
+      headers:{"Content-Type":"application/json","apikey":SB_KEY},
+      // Supabase accepts Google access tokens via the OpenID provider flow
+      body:JSON.stringify({provider:"google",id_token:googleToken})
+    });
+    // Fallback: if id_token flow fails (access token vs id token), use anon key only
+    // and store email as user_id directly — RLS policy uses email match
+    if(!r.ok){
+      // Use Google email as user_id with anon key — works with permissive RLS
+      return {ok:false};
+    }
+    const j=await r.json();
+    if(j.access_token){_sbJwt=j.access_token;return{ok:true,jwt:j.access_token};}
+    return{ok:false};
+  }catch(e){return{ok:false};}
+}
+
+// Load user data from Supabase
+async function sbLoad(email){
+  try{
+    const r=await fetch(SB_URL+"/rest/v1/tr_user_data?user_id=eq."+encodeURIComponent(email)+"&select=*",{headers:sbH({"Prefer":"return=representation"})});
+    if(!r.ok)return null;
+    const j=await r.json();
+    if(!j||!j.length)return null;
+    return{projects:j[0].projects||[],paints:j[0].paints||[],log:j[0].log||[]};
+  }catch(e){return null;}
+}
+
+// Save user data to Supabase (upsert)
+async function sbSave(email,payload){
+  try{
+    const body=JSON.stringify({user_id:email,projects:payload.projects,paints:payload.paints,log:payload.log,updated_at:new Date().toISOString()});
+    const r=await fetch(SB_URL+"/rest/v1/tr_user_data",{
+      method:"POST",
+      headers:sbH({"Prefer":"resolution=merge-duplicates,return=minimal"}),
+      body
+    });
+    return r.ok||r.status===201||r.status===204;
+  }catch(e){return false;}
+}
+
+// Update public profile (for live Following)
+async function sbSaveProfile(email,displayName,data){
+  try{
+    const projects=data.projects.map(p=>{const s=getStats(p);return{name:p.name,faction:p.faction||"",stats:s,unitCount:p.units.length,recipeCount:(p.recipes||[]).length,backlog:p.units.filter(u=>u.status!=="painted").map(u=>({name:u.name,models:u.models,status:u.status}))};});
+    const body=JSON.stringify({user_id:email,display_name:displayName||email.split("@")[0],profile:{ts:Date.now(),projects},updated_at:new Date().toISOString()});
+    const r=await fetch(SB_URL+"/rest/v1/tr_public_profiles",{
+      method:"POST",
+      headers:sbH({"Prefer":"resolution=merge-duplicates,return=minimal"}),
+      body
+    });
+    return r.ok||r.status===201||r.status===204;
+  }catch(e){return false;}
+}
+
+// Fetch a single public profile by email
+async function sbGetProfile(email){
+  try{
+    const r=await fetch(SB_URL+"/rest/v1/tr_public_profiles?user_id=eq."+encodeURIComponent(email)+"&select=*",{headers:sbH()});
+    if(!r.ok)return null;
+    const j=await r.json();
+    return j&&j.length?j[0]:null;
+  }catch(e){return null;}
+}
+
+// Fetch all public profiles (for discovery / following list refresh)
+async function sbGetProfiles(emails){
+  if(!emails||!emails.length)return[];
+  try{
+    const ids=emails.map(e=>encodeURIComponent(e)).join(",");
+    const r=await fetch(SB_URL+"/rest/v1/tr_public_profiles?user_id=in.("+ids+")&select=*",{headers:sbH()});
+    if(!r.ok)return[];
+    return await r.json();
+  }catch(e){return[];}
+}
+
+// Subscribe to realtime changes on tr_public_profiles
+// Returns an unsubscribe function
+function sbSubscribeProfiles(onUpdate){
+  // Supabase realtime over WebSocket
+  const ws=new WebSocket(SB_URL.replace("https","wss")+"/realtime/v1/websocket?apikey="+SB_KEY+"&vsn=1.0.0");
+  let hbInterval=null;
+  ws.onopen=()=>{
+    ws.send(JSON.stringify({topic:"realtime:public:tr_public_profiles",event:"phx_join",payload:{},ref:"1"}));
+    hbInterval=setInterval(()=>ws.send(JSON.stringify({topic:"phoenix",event:"heartbeat",payload:{},ref:"hb"})),25000);
+  };
+  ws.onmessage=e=>{
+    try{
+      const msg=JSON.parse(e.data);
+      if(msg.event==="INSERT"||msg.event==="UPDATE"||msg.event==="DELETE"){
+        onUpdate(msg.payload);
+      }
+    }catch(err){}
+  };
+  ws.onerror=()=>{};
+  return()=>{clearInterval(hbInterval);try{ws.close();}catch(e){}};
+}
 
 const SK={data:"tr-d1",paints:"tr-p1",log:"tr-l1",backup:"tr-b1",hobby:"tr-h1",following:"tr-f1",skip:"tr-skip",dname:"tr-name"};
 const lsGet=(k,d)=>{try{const r=localStorage.getItem(k);return r?JSON.parse(r):d;}catch(e){return d;}};
@@ -76,12 +192,60 @@ async function parseImp(file){try{const raw=JSON.parse(await toTxt(file));const 
 function useAuth(){
   const [sess,setSess]=useState(undefined);
   const tcRef=useRef(null);
-  useEffect(()=>{const s=lsGet(TKEY,null);if(s&&s.expiresAt>Date.now()){setSess({token:s.token,email:s.email});}else{lsSet(TKEY,null);setSess(null);}}, []);
-  useEffect(()=>{const t=setInterval(()=>{const s=lsGet(TKEY,null);if(s&&s.expiresAt&&s.expiresAt<Date.now()){lsSet(TKEY,null);setSess(null);}},30000);return()=>clearInterval(t);},[]);
-  useEffect(()=>{let tries=0;const init=()=>{if(window.google&&window.google.accounts&&window.google.accounts.oauth2){tcRef.current=window.google.accounts.oauth2.initTokenClient({client_id:GID,scope:GSCOPE,callback:async resp=>{if(resp.error)return;const tok=resp.access_token;const exp=Date.now()+(resp.expires_in||3600)*1000-60000;const email=await gEmail(tok);lsSet(TKEY,{token:tok,email,expiresAt:exp});setSess({token:tok,email});}});}else if(tries<50){tries++;setTimeout(init,100);}};init();},[]);
+
+  // Restore session from localStorage on mount
+  useEffect(()=>{
+    const s=lsGet(TKEY,null);
+    if(s&&s.expiresAt>Date.now()){setSess({token:s.token,email:s.email});}
+    else{lsSet(TKEY,null);setSess(null);}
+  },[]);
+
+  // Token expiry check every 30s
+  useEffect(()=>{
+    const t=setInterval(()=>{
+      const s=lsGet(TKEY,null);
+      if(s&&s.expiresAt&&s.expiresAt<Date.now()){lsSet(TKEY,null);setSess(null);}
+    },30000);
+    return()=>clearInterval(t);
+  },[]);
+
+  // Init Google OAuth token client (sign-in only, no Drive scope needed)
+  useEffect(()=>{
+    let tries=0;
+    const init=()=>{
+      if(window.google&&window.google.accounts&&window.google.accounts.oauth2){
+        tcRef.current=window.google.accounts.oauth2.initTokenClient({
+          client_id:GID,
+          scope:GSCOPE,
+          callback:async resp=>{
+            if(resp.error)return;
+            const tok=resp.access_token;
+            const exp=Date.now()+(resp.expires_in||3600)*1000-60000;
+            const email=await gEmail(tok);
+            if(!email)return;
+            // Try to get a Supabase JWT (best case — enables RLS)
+            await sbSignIn(tok);
+            lsSet(TKEY,{token:tok,email,expiresAt:exp});
+            setSess({token:tok,email});sbSetEmail(email);
+          }
+        });
+      } else if(tries<50){tries++;setTimeout(init,100);}
+    };
+    init();
+  },[]);
+
   const signIn=useCallback(()=>{if(tcRef.current)tcRef.current.requestAccessToken({prompt:"consent"});},[]);
-  const signOut=useCallback(()=>{const s=lsGet(TKEY,null);if(s&&s.token&&window.google&&window.google.accounts&&window.google.accounts.oauth2)window.google.accounts.oauth2.revoke(s.token,()=>{});lsSet(TKEY,null);setSess(null);},[]);
-  return {sess,signIn,signOut};
+  const signOut=useCallback(()=>{
+    const s=lsGet(TKEY,null);
+    if(s&&s.token&&window.google&&window.google.accounts&&window.google.accounts.oauth2){
+      window.google.accounts.oauth2.revoke(s.token,()=>{});
+    }
+    lsSet(TKEY,null);
+    _sbJwt=null;
+    setSess(null);
+  },[]);
+
+  return{sess,signIn,signOut};
 }
 function usePaints(){
   const [paints,setPaints]=useState(()=>{
@@ -701,25 +865,77 @@ function SharedView({projects,by,onBack,onAdd}){
 
 function Following({onClose}){
   const [list,setList]=useState(()=>lsGet(SK.following,[]));
-  const [addUrl,setAddUrl]=useState("");
+  const [liveData,setLiveData]=useState({}); // email -> latest profile from Supabase
+  const [addEmail,setAddEmail]=useState("");
   const [addErr,setAddErr]=useState("");
   const [viewing,setViewing]=useState(null);
+  const [refreshing,setRefreshing]=useState(false);
+
   useEffect(()=>{lsSet(SK.following,list);},[list]);
+
+  // Load latest data for all followed users from Supabase
+  async function refreshAll(followList){
+    const emails=followList.filter(e=>e.type==="supabase").map(e=>e.email);
+    if(!emails.length)return;
+    setRefreshing(true);
+    const profiles=await sbGetProfiles(emails);
+    const map={};
+    profiles.forEach(p=>{map[p.user_id]=p;});
+    setLiveData(map);
+    setRefreshing(false);
+  }
+
+  useEffect(()=>{refreshAll(list);},[]);
+
+  // Realtime subscription — update liveData when any followed profile changes
+  useEffect(()=>{
+    const emails=new Set(list.filter(e=>e.type==="supabase").map(e=>e.email));
+    if(!emails.size)return;
+    const unsub=sbSubscribeProfiles(payload=>{
+      const row=payload.record||payload.new;
+      if(row&&emails.has(row.user_id)){
+        setLiveData(d=>({...d,[row.user_id]:row}));
+      }
+    });
+    return unsub;
+  },[list]);
+
   function initials(name){if(!name)return "?";return name.trim().split(" ").map(w=>w[0]).join("").toUpperCase().slice(0,2);}
   function acolor(name){const cols=[T.accent,T.blue,T.green,T.orange,T.yellow];return name?cols[name.charCodeAt(0)%cols.length]:T.text3;}
-  function addFollow(){
-    const url=addUrl.trim();if(!url){setAddErr("Paste a share link first.");return;}
-    const dm=url.match(/#dashboard=([^&]+)/);
-    if(dm){const pl=decDB("#dashboard="+dm[1]);if(pl){setList(f=>[...f.filter(x=>x.url!==url),{url,type:"dashboard",by:pl.by||"",projectCount:pl.projects.length,ts:Date.now()}]);setAddUrl("");setAddErr("");return;}}
-    const sm=url.match(/#share=([^&]+)/);
-    if(sm){const d=decShr("#share="+sm[1]);if(d){setList(f=>[...f.filter(x=>x.url!==url),{url,type:"projects",by:d.by||"",projectNames:d.projects.map(p=>p.name),ts:Date.now()}]);setAddUrl("");setAddErr("");return;}}
-    setAddErr("Could not read that link - make sure it is a Tabletop Ready share link.");
+
+  async function addFollow(){
+    const raw=addEmail.trim();
+    if(!raw){setAddErr("Enter an email address.");return;}
+    // Validate it looks like an email
+    if(!raw.includes("@")){setAddErr("Enter the email address they use to sign in to Tabletop Ready.");return;}
+    setAddErr("");
+    setRefreshing(true);
+    const profile=await sbGetProfile(raw);
+    setRefreshing(false);
+    if(!profile){setAddErr("No Tabletop Ready account found for that email. Make sure they have signed in and saved some data.");return;}
+    if(list.some(e=>e.email===raw)){setAddErr("Already following that person.");return;}
+    setList(f=>[...f,{type:"supabase",email:raw,by:profile.display_name||raw.split("@")[0],ts:Date.now()}]);
+    setAddEmail("");
+    setLiveData(d=>({...d,[raw]:profile}));
   }
-  function open(entry){
-    if(entry.type==="dashboard"){const m=entry.url.match(/#dashboard=([^&]+)/);if(m){const p=decDB("#dashboard="+m[1]);if(p){setViewing({type:"dashboard",payload:p,by:entry.by});return;}}}
-    else{const m=entry.url.match(/#share=([^&]+)/);if(m){const d=decShr("#share="+m[1]);if(d){setViewing({type:"projects",projects:d.projects,by:entry.by||d.by});return;}}}
+
+  function removeFollow(email){setList(f=>f.filter(x=>x.email!==email));}
+
+  function openFollow(entry){
+    const profile=liveData[entry.email];
+    if(!profile||!profile.profile||!profile.profile.projects){
+      setAddErr("No data yet for this person.");return;
+    }
+    setViewing({
+      type:"dashboard",
+      payload:{...profile.profile,by:profile.display_name||entry.by},
+    });
   }
-  if(viewing){if(viewing.type==="dashboard")return <SharedDB payload={{...viewing.payload,by:viewing.by}} onBack={()=>setViewing(null)}/>;return <SharedView projects={viewing.projects} by={viewing.by} onBack={()=>setViewing(null)}/>;}
+
+  if(viewing){
+    if(viewing.type==="dashboard")return <SharedDB payload={viewing.payload} onBack={()=>setViewing(null)}/>;
+    return <SharedView projects={viewing.projects} by={viewing.by} onBack={()=>setViewing(null)}/>;
+  }
   return <div style={{minHeight:"100dvh",background:T.bg0,fontFamily:"inherit",display:"flex",flexDirection:"column"}}>
     <div style={{borderBottom:"1px solid "+T.border,padding:"calc(14px + env(safe-area-inset-top)) 15px 13px",display:"flex",alignItems:"center",gap:10,background:"#fff",position:"sticky",top:0,zIndex:50}}>
       <button onClick={onClose} style={{background:"none",border:"none",color:T.text2,cursor:"pointer",fontSize:20,width:36,height:36,display:"flex",alignItems:"center",justifyContent:"center",borderRadius:10}}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg></button>
@@ -727,20 +943,62 @@ function Following({onClose}){
       <span style={{fontSize:13,color:T.text3,fontWeight:600}}>{list.length} following</span>
     </div>
     <div style={{flex:1,overflowY:"auto",padding:"12px 15px 40px",maxWidth:680,margin:"0 auto",width:"100%"}}>
+      {/* Add new follow */}
       <div style={{background:"#fff",borderRadius:18,padding:"18px",marginBottom:16,marginTop:6,boxShadow:T.shadow}}>
-        <div style={{fontSize:12,color:T.text3,fontWeight:700,textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:10}}>Follow someone</div>
-        <div style={{display:"flex",gap:8,alignItems:"flex-start"}}><input value={addUrl} onChange={e=>{setAddUrl(e.target.value);setAddErr("");}} placeholder="Paste a share link here..." style={{...IS,flex:1,fontSize:13}} onKeyDown={e=>e.key==="Enter"&&addFollow()}/><Btn sm onClick={addFollow} sx={{flexShrink:0,height:38}}>Follow</Btn></div>
-        {addErr&&<div style={{fontSize:12,color:T.red,marginTop:6}}>{addErr}</div>}
-        <div style={{fontSize:12,color:T.text3,marginTop:8,lineHeight:1.6}}>Ask your friend to share their Dashboard or a project, then paste that link here.</div>
+        <div style={{fontSize:12,color:T.text3,fontWeight:600,textTransform:"uppercase",letterSpacing:"0.07em",marginBottom:12}}>Follow someone</div>
+        <div style={{display:"flex",gap:8,alignItems:"flex-start"}}>
+          <input value={addEmail} onChange={e=>{setAddEmail(e.target.value);setAddErr("");}} placeholder="Their Tabletop Ready email..." style={{...IS,flex:1,fontSize:14}} onKeyDown={e=>e.key==="Enter"&&addFollow()}/>
+          <Btn sm onClick={addFollow} sx={{flexShrink:0,height:42}}>{refreshing?"...":"Follow"}</Btn>
+        </div>
+        {addErr&&<div style={{fontSize:13,color:T.red,marginTop:8,lineHeight:1.5}}>{addErr}</div>}
+        <div style={{fontSize:12,color:T.text3,marginTop:10,lineHeight:1.6,padding:"10px 12px",background:T.bg2,borderRadius:10}}>
+          Enter the email address your friend uses to sign in. Their hobby progress will update live automatically.
+        </div>
       </div>
-      {list.length===0?<div style={{textAlign:"center",padding:"50px 20px",color:T.text3}}><div style={{fontSize:32,marginBottom:12}}>👥</div><div style={{fontSize:15,fontWeight:700,color:T.text,marginBottom:8}}>Not following anyone yet</div><div style={{fontSize:14}}>Paste a friend's share link above.</div></div>:list.map((entry,i)=>{
-        const name=entry.by||"Unknown";const col=acolor(name);
-        const sub=entry.type==="dashboard"?"Dashboard - "+entry.projectCount+" projects":(entry.projectNames||[]).slice(0,2).join(", ")+(entry.projectNames&&entry.projectNames.length>2?" +more":"");
-        return <div key={i} onClick={()=>open(entry)} style={{background:"#fff",borderRadius:18,padding:"16px",marginBottom:10,cursor:"pointer",display:"flex",alignItems:"center",gap:12,boxShadow:T.shadow}}>
-          <div style={{width:44,height:44,borderRadius:"50%",background:col+"20",border:"2px solid "+col+"40",display:"flex",alignItems:"center",justifyContent:"center",fontSize:15,fontWeight:900,color:col,flexShrink:0}}>{initials(name)}</div>
-          <div style={{flex:1,minWidth:0}}><div style={{fontSize:15,fontWeight:700,color:T.text}}>{name}</div><div style={{fontSize:12,color:T.text3,marginTop:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{sub}</div><div style={{fontSize:11,color:T.text3,marginTop:2}}>Saved {new Date(entry.ts).toLocaleDateString()}</div></div>
-          <div style={{display:"flex",gap:8,alignItems:"center",flexShrink:0}}><span style={{fontSize:12,color:T.accent,fontWeight:700}}>View</span><button onClick={e=>{e.stopPropagation();setList(f=>f.filter(x=>x.url!==entry.url));}} style={{background:"none",border:"1px solid "+T.border,borderRadius:8,padding:"4px 8px",fontSize:12,color:T.text3,cursor:"pointer",fontFamily:"inherit"}}>Remove</button></div>
-        </div>;})}
+
+      {list.length>0&&<div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+        <div style={{fontSize:13,color:T.text2,fontWeight:600}}>{list.length} following</div>
+        <button onClick={()=>refreshAll(list)} style={{background:"none",border:"1px solid "+T.border,borderRadius:8,padding:"5px 12px",fontSize:12,color:T.text2,cursor:"pointer",fontFamily:"inherit"}}>{refreshing?"Refreshing...":"Refresh all"}</button>
+      </div>}
+
+      {list.length===0
+        ?<div style={{textAlign:"center",padding:"60px 20px",color:T.text3}}>
+          <div style={{fontSize:40,marginBottom:16}}>👥</div>
+          <div style={{fontSize:17,fontWeight:700,color:T.text,marginBottom:8}}>Not following anyone yet</div>
+          <div style={{fontSize:14,lineHeight:1.6}}>Enter a friend's email address above to follow their hobby progress in real time.</div>
+        </div>
+        :list.map((entry,i)=>{
+          const live=liveData[entry.email];
+          const name=(live&&live.display_name)||entry.by||entry.email.split("@")[0];
+          const col=acolor(name);
+          const profile=live&&live.profile;
+          const pjs=profile&&profile.projects||[];
+          const painted=pjs.reduce((a,p)=>a+(p.stats&&p.stats.painted||0),0);
+          const total=pjs.reduce((a,p)=>a+(p.stats&&p.stats.total||0),0);
+          const pct=total?Math.round(painted/total*100):0;
+          const lastUpdate=live&&live.updated_at?new Date(live.updated_at).toLocaleString():null;
+          const fakeStats={painted,built:pjs.reduce((a,p)=>a+(p.stats&&p.stats.built||0),0),unbuilt:pjs.reduce((a,p)=>a+(p.stats&&p.stats.unbuilt||0),0),new_in_box:pjs.reduce((a,p)=>a+(p.stats&&p.stats.new_in_box||0),0),total};
+          return <div key={i} onClick={()=>openFollow(entry)} style={{background:"#fff",borderRadius:18,padding:"16px 18px",marginBottom:10,cursor:"pointer",boxShadow:T.shadow}}>
+            <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:total?8:0}}>
+              <div style={{width:46,height:46,borderRadius:"50%",background:col+"18",border:"2px solid "+col+"30",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,fontWeight:800,color:col,flexShrink:0}}>{initials(name)}</div>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:16,fontWeight:700,color:T.text,lineHeight:1.2}}>{name}</div>
+                <div style={{fontSize:12,color:T.text3,marginTop:2}}>
+                  {pjs.length} project{pjs.length!==1?"s":""}
+                  {total>0&&<span> · {painted}/{total} painted ({pct}%)</span>}
+                </div>
+                {lastUpdate&&<div style={{fontSize:11,color:T.text3,marginTop:1}}>Updated {lastUpdate}</div>}
+              </div>
+              <div style={{display:"flex",gap:6,alignItems:"center",flexShrink:0}}>
+                <span style={{fontSize:12,color:T.accent,fontWeight:700}}>View →</span>
+                <button onClick={e=>{e.stopPropagation();removeFollow(entry.email);}} style={{background:"none",border:"1px solid "+T.border,borderRadius:8,padding:"4px 10px",fontSize:12,color:T.text3,cursor:"pointer",fontFamily:"inherit"}}>Remove</button>
+              </div>
+            </div>
+            {total>0&&<Bar stats={fakeStats}/>}
+            {!live&&<div style={{fontSize:12,color:T.text3,fontStyle:"italic",marginTop:4}}>Loading latest data...</div>}
+          </div>;
+        })
+      }
     </div>
     {/* Bottom nav */}
     <div style={{position:"fixed",bottom:0,left:0,right:0,background:"#fff",borderTop:"1px solid "+T.border,display:"flex",zIndex:100,paddingBottom:"env(safe-area-inset-bottom)"}}>
@@ -752,6 +1010,7 @@ function Following({onClose}){
     </div>
   </div>;
 }
+
 
 function App(){
   const {sess,signIn,signOut}=useAuth();
@@ -789,15 +1048,39 @@ function App(){
   useEffect(()=>{lsSet(SK.data,data);},[data]);
   useEffect(()=>{const last=lsGet(SK.backup,null);if(last){const days=(Date.now()-new Date(last).getTime())/(1000*60*60*24);if(days>=7)setShowBkp(true);}},[]);
 
+  // ── Load from Supabase on sign-in ──────────────────────────────────────────
   useEffect(()=>{
-    if(!sess||!sess.token||cloudLoaded)return;
-    (async()=>{setSyncSt("syncing");const cloud=await gLoad(sess.token);if(cloud){if(cloud.projects&&cloud.projects.length)setData({projects:cloud.projects});if(cloud.paints&&cloud.paints.length)setPaints(cloud.paints);if(cloud.log&&cloud.log.length)setLog(cloud.log);}else{await gSave(sess.token,{projects:data.projects,paints,log});}setCloudLoaded(true);setSyncSt("synced");setSyncErr(null);})();
+    if(!sess||!sess.email||cloudLoaded)return;
+    (async()=>{
+      setSyncSt("syncing");
+      const cloud=await sbLoad(sess.email);
+      if(cloud){
+        if(cloud.projects&&cloud.projects.length)setData({projects:cloud.projects});
+        if(cloud.paints&&cloud.paints.length)setPaints(cloud.paints);
+        if(cloud.log&&cloud.log.length)setLog(cloud.log);
+      } else {
+        // First time — push local data up
+        await sbSave(sess.email,{projects:data.projects,paints,log});
+      }
+      setCloudLoaded(true);
+      setSyncSt("synced");
+      setSyncErr(null);
+    })();
   },[sess,cloudLoaded]);
 
+  // ── Save to Supabase on changes (debounced 1.5s) ─────────────────────────
   useEffect(()=>{
-    if(!sess||!sess.token||!cloudLoaded)return;
+    if(!sess||!sess.email||!cloudLoaded)return;
     setSyncSt("syncing");
-    const t=setTimeout(async()=>{const ok=await gSave(sess.token,{projects:data.projects,paints,log});if(ok){setSyncSt("synced");setSyncErr(null);}else{setSyncSt("error");setSyncErr("Sync failed - check your connection.");}},1500);
+    const t=setTimeout(async()=>{
+      const dn=lsGet(SK.dname,"");
+      const [ok]=await Promise.all([
+        sbSave(sess.email,{projects:data.projects,paints,log}),
+        sbSaveProfile(sess.email,dn,data),
+      ]);
+      if(ok){setSyncSt("synced");setSyncErr(null);}
+      else{setSyncSt("error");setSyncErr("Sync failed — check your connection.");}
+    },1500);
     return()=>clearTimeout(t);
   },[data,paints,log,sess,cloudLoaded]);
 
