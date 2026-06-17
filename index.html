@@ -113,7 +113,7 @@ async function sbSaveProfile(email,displayName,data){
 // Fetch a single public profile by email
 async function sbGetProfile(email){
   try{
-    const r=await fetch(SB_URL+"/rest/v1/tr_public_profiles?user_id=eq."+encodeURIComponent(email)+"&select=*",{headers:sbH()});
+    const r=await fetch(SB_URL+"/rest/v1/tr_public_profiles?user_id=ilike."+encodeURIComponent(email.toLowerCase())+"&select=*",{headers:sbH()});
     if(!r.ok)return null;
     const j=await r.json();
     return j&&j.length?j[0]:null;
@@ -895,7 +895,7 @@ function Following({onClose}){
   function acolor(name){const cols=[T.accent,T.blue,T.green,T.orange,T.yellow];return name?cols[name.charCodeAt(0)%cols.length]:T.text3;}
 
   async function addFollow(){
-    const raw=addEmail.trim();
+    const raw=addEmail.trim().toLowerCase();
     if(!raw){setAddErr("Enter an email address.");return;}
     // Validate it looks like an email
     if(!raw.includes("@")){setAddErr("Enter the email address they use to sign in to Tabletop Ready.");return;}
