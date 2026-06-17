@@ -229,8 +229,7 @@ function useAuth(){
 
   const signIn=useCallback(()=>{
     // Redirect through Supabase OAuth — it handles Google auth and returns a JWT
-    const redirectTo=encodeURIComponent(window.location.href.split("#")[0]);
-    window.location.href=SB_URL+"/auth/v1/authorize?provider=google&redirect_to="+redirectTo;
+    window.location.href=SB_URL+"/auth/v1/authorize?provider=google";
   },[]);
 
   const signOut=useCallback(()=>{
