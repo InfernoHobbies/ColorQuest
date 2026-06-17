@@ -229,7 +229,8 @@ function useAuth(){
 
   const signIn=useCallback(()=>{
     // Redirect through Supabase OAuth — it handles Google auth and returns a JWT
-    window.location.href=SB_URL+"/auth/v1/authorize?provider=google";
+    const redirectTo=encodeURIComponent("https://infernohobbies.github.io/ColorQuest/");
+    window.location.href=SB_URL+"/auth/v1/authorize?provider=google&redirect_to="+redirectTo;
   },[]);
 
   const signOut=useCallback(()=>{
