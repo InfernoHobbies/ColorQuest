@@ -30,52 +30,183 @@ const {useState,useEffect,useMemo,useRef,useCallback} = React;
 
 const T={bg0:"#f4f5f8",bg1:"#ffffff",bg2:"#f8f9fb",border:"#eceef2",border2:"#dde0e7",text:"#111318",text2:"#4a5568",text3:"#94a3b8",accent:"#5b6af0",accentDim:"rgba(91,106,240,0.08)",accentLight:"rgba(91,106,240,0.15)",green:"#16a34a",greenDim:"rgba(22,163,74,0.10)",blue:"#2563eb",blueDim:"rgba(37,99,235,0.10)",yellow:"#d97706",yellowDim:"rgba(217,119,6,0.10)",orange:"#ea580c",red:"#dc2626",redDim:"rgba(220,38,38,0.10)",shadow:"0 1px 3px rgba(0,0,0,0.06),0 1px 8px rgba(0,0,0,0.04)",shadowMd:"0 4px 16px rgba(0,0,0,0.08),0 1px 4px rgba(0,0,0,0.04)"};
 
+// ── Google OAuth (sign-in only) ──────────────────────────────────────────────
 const GID="455364707867-m9lpq40cs3kmnirpubdh7sqbrtfpta4m.apps.googleusercontent.com";
+const GSCOPE="https://www.googleapis.com/auth/userinfo.email";
 const TKEY="tr-token";
-function jwtEmail(idToken){try{const p=idToken.split(".")[1];const j=JSON.parse(atob(p.replace(/-/g,"+").replace(/_/g,"/")));return j.email||null;}catch(e){return null;}}
 
+async function gEmail(tok){try{const r=await fetch("https://www.googleapis.com/oauth2/v2/userinfo",{headers:{Authorization:"Bearer "+tok}});if(!r.ok)return null;const j=await r.json();return j.email||null;}catch(e){return null;}}
+
+// ── Supabase client ───────────────────────────────────────────────────────────
 const SB_URL="https://ipyrazhrdvjlmlfyltui.supabase.co";
 const SB_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlweXJhemhyZHZqbG1sZnlsdHVpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEzMjIwOTgsImV4cCI6MjA5Njg5ODA5OH0.OPc_rhdUr3nGRV4RWgzqO8T5mIZg9EEHhmiZX_y8wCM";
+
+// Supabase request helper — attaches auth header using cached Supabase JWT
 let _sbJwt=null;
-function sbH(extra){return{"Content-Type":"application/json","apikey":SB_KEY,"Authorization":"Bearer "+(_sbJwt||SB_KEY),...extra};}
+let _sbEmail=null;
+// Attach auth headers - uses Supabase JWT if available, falls back to anon key
+function sbH(extra){
+  return{
+    "Content-Type":"application/json",
+    "apikey":SB_KEY,
+    "Authorization":"Bearer "+(_sbJwt||SB_KEY),
+    ...extra
+  };
+}
+// Set email context when user signs in (used for upserts)
+function sbSetEmail(email){_sbEmail=email;}
 
+// Exchange Google access token for a Supabase JWT (signs user into Supabase Auth)
+async function sbSignIn(googleToken){
+  try{
+    const r=await fetch(SB_URL+"/auth/v1/token?grant_type=id_token",{
+      method:"POST",
+      headers:{"Content-Type":"application/json","apikey":SB_KEY},
+      // Supabase accepts Google access tokens via the OpenID provider flow
+      body:JSON.stringify({provider:"google",id_token:googleToken})
+    });
+    // Fallback: if id_token flow fails (access token vs id token), use anon key only
+    // and store email as user_id directly — RLS policy uses email match
+    if(!r.ok){
+      // Use Google email as user_id with anon key — works with permissive RLS
+      return {ok:false};
+    }
+    const j=await r.json();
+    if(j.access_token){_sbJwt=j.access_token;return{ok:true,jwt:j.access_token};}
+    return{ok:false};
+  }catch(e){return{ok:false};}
+}
+
+// Load user data from Supabase
 async function sbLoad(email){
-  try{const r=await fetch(SB_URL+"/rest/v1/tr_user_data?user_id=eq."+encodeURIComponent(email)+"&select=*",{headers:sbH({"Prefer":"return=representation"})});if(!r.ok)return null;const j=await r.json();if(!j||!j.length)return null;return{projects:j[0].projects||[],log:j[0].log||[]};}catch(e){return null;}
+  try{
+    const r=await fetch(SB_URL+"/rest/v1/tr_user_data?user_id=eq."+encodeURIComponent(email)+"&select=*",{headers:sbH({"Prefer":"return=representation"})});
+    if(!r.ok)return null;
+    const j=await r.json();
+    if(!j||!j.length)return null;
+    return{projects:j[0].projects||[],paints:j[0].paints||[],log:j[0].log||[]};
+  }catch(e){return null;}
 }
-async function sbSave(email,payload){
-  try{const body=JSON.stringify({user_id:email,projects:payload.projects,log:payload.log,updated_at:new Date().toISOString()});const r=await fetch(SB_URL+"/rest/v1/tr_user_data",{method:"POST",headers:sbH({"Prefer":"resolution=merge-duplicates,return=minimal"}),body});return r.ok||r.status===201||r.status===204;}catch(e){return false;}
-}
-async function sbSaveProfile(email,displayName,data){
-  try{const projects=data.projects.map(p=>{const s=getStats(p);return{name:p.name,faction:p.faction||"",stats:s,unitCount:p.units.length,recipeCount:(p.recipes||[]).length,backlog:p.units.filter(u=>u.status!=="painted").map(u=>({name:u.name,models:u.models,status:u.status}))};});const body=JSON.stringify({user_id:email,display_name:displayName||email.split("@")[0],profile:{ts:Date.now(),projects},updated_at:new Date().toISOString()});const r=await fetch(SB_URL+"/rest/v1/tr_public_profiles",{method:"POST",headers:sbH({"Prefer":"resolution=merge-duplicates,return=minimal"}),body});return r.ok||r.status===201||r.status===204;}catch(e){return false;}
-}
-async function sbGetProfile(email){try{const r=await fetch(SB_URL+"/rest/v1/tr_public_profiles?user_id=ilike."+encodeURIComponent(email.toLowerCase())+"&select=*",{headers:sbH()});if(!r.ok)return null;const j=await r.json();return j&&j.length?j[0]:null;}catch(e){return null;}}
-async function sbGetProfiles(emails){if(!emails||!emails.length)return[];try{const ids=emails.map(e=>encodeURIComponent(e)).join(",");const r=await fetch(SB_URL+"/rest/v1/tr_public_profiles?user_id=in.("+ids+")&select=*",{headers:sbH()});if(!r.ok)return[];return await r.json();}catch(e){return[];}}
 
-// ── Paint helpers (new Supabase tables) ──────────────────────────────────────
-async function sbLoadAllPaints(){
-  try{const r=await fetch(SB_URL+"/rest/v1/paints?select=id,name,type,brand&order=type,name&limit=1000",{headers:sbH()});if(!r.ok)return[];return await r.json();}catch(e){return[];}
+// Save user data to Supabase (upsert)
+async function sbSave(email,payload){
+  try{
+    const body=JSON.stringify({user_id:email,projects:payload.projects,paints:payload.paints,log:payload.log,updated_at:new Date().toISOString()});
+    const r=await fetch(SB_URL+"/rest/v1/tr_user_data",{
+      method:"POST",
+      headers:sbH({"Prefer":"resolution=merge-duplicates,return=minimal"}),
+      body
+    });
+    return r.ok||r.status===201||r.status===204;
+  }catch(e){return false;}
 }
-async function sbLoadUserPaints(userId){
-  try{const r=await fetch(SB_URL+"/rest/v1/user_paints?user_id=eq."+encodeURIComponent(userId)+"&select=paint_id,owned",{headers:sbH()});if(!r.ok)return{};const rows=await r.json();const map={};rows.forEach(row=>{map[row.paint_id]=row.owned;});return map;}catch(e){return{};}
+
+// Update public profile (for live Following)
+async function sbSaveProfile(email,displayName,data){
+  try{
+    const projects=data.projects.map(p=>{const s=getStats(p);return{name:p.name,faction:p.faction||"",stats:s,unitCount:p.units.length,recipeCount:(p.recipes||[]).length,backlog:p.units.filter(u=>u.status!=="painted").map(u=>({name:u.name,models:u.models,status:u.status}))};});
+    const body=JSON.stringify({user_id:email,display_name:displayName||email.split("@")[0],profile:{ts:Date.now(),projects},updated_at:new Date().toISOString()});
+    const r=await fetch(SB_URL+"/rest/v1/tr_public_profiles",{
+      method:"POST",
+      headers:sbH({"Prefer":"resolution=merge-duplicates,return=minimal"}),
+      body
+    });
+    return r.ok||r.status===201||r.status===204;
+  }catch(e){return false;}
 }
-async function sbTogglePaint(userId,paintId,owned){
-  try{const body=JSON.stringify({user_id:userId,paint_id:paintId,owned});const r=await fetch(SB_URL+"/rest/v1/user_paints",{method:"POST",headers:sbH({"Prefer":"resolution=merge-duplicates,return=minimal"}),body});return r.ok||r.status===201||r.status===204;}catch(e){return false;}
+
+// Fetch a single public profile by email
+async function sbGetProfile(email){
+  try{
+    const r=await fetch(SB_URL+"/rest/v1/tr_public_profiles?user_id=eq."+encodeURIComponent(email)+"&select=*",{headers:sbH()});
+    if(!r.ok)return null;
+    const j=await r.json();
+    return j&&j.length?j[0]:null;
+  }catch(e){return null;}
+}
+
+// Fetch all public profiles (for discovery / following list refresh)
+async function sbGetProfiles(emails){
+  if(!emails||!emails.length)return[];
+  try{
+    const ids=emails.map(e=>encodeURIComponent(e)).join(",");
+    const r=await fetch(SB_URL+"/rest/v1/tr_public_profiles?user_id=in.("+ids+")&select=*",{headers:sbH()});
+    if(!r.ok)return[];
+    return await r.json();
+  }catch(e){return[];}
+}
+
+// Subscribe to realtime changes on tr_public_profiles
+// Returns an unsubscribe function
+// ── Supabase Storage: photo upload ───────────────────────────────────────────
+async function compressImage(file,maxPx=1200,quality=0.82){
+  return new Promise(res=>{
+    const img=new Image();
+    const url=URL.createObjectURL(file);
+    img.onload=()=>{
+      const scale=Math.min(1,maxPx/Math.max(img.width,img.height));
+      const w=Math.round(img.width*scale),h=Math.round(img.height*scale);
+      const c=document.createElement("canvas");c.width=w;c.height=h;
+      c.getContext("2d").drawImage(img,0,0,w,h);
+      URL.revokeObjectURL(url);
+      c.toBlob(b=>res(b),"image/jpeg",quality);
+    };
+    img.src=url;
+  });
+}
+
+async function sbUploadPhoto(email,projectId,unitId,slot,file){
+  try{
+    const blob=await compressImage(file);
+    const path=encodeURIComponent(email)+"/"+projectId+"/"+unitId+"-"+slot+".jpg";
+    const r=await fetch(SB_URL+"/storage/v1/object/tr-photos/"+path,{
+      method:"POST",
+      headers:{"apikey":SB_KEY,"Authorization":"Bearer "+(_sbJwt||SB_KEY),"Content-Type":"image/jpeg","x-upsert":"true"},
+      body:blob
+    });
+    if(!r.ok){const e=await r.text();console.error("Upload failed",e);return null;}
+    return SB_URL+"/storage/v1/object/public/tr-photos/"+path;
+  }catch(e){console.error("Upload error",e);return null;}
+}
+
+async function sbDeletePhoto(url){
+  try{
+    const path=url.split("/object/public/tr-photos/")[1];
+    if(!path)return;
+    await fetch(SB_URL+"/storage/v1/object/tr-photos/"+path,{
+      method:"DELETE",
+      headers:{"apikey":SB_KEY,"Authorization":"Bearer "+(_sbJwt||SB_KEY)}
+    });
+  }catch(e){}
 }
 
 function sbSubscribeProfiles(onUpdate){
+  // Supabase realtime over WebSocket
   const ws=new WebSocket(SB_URL.replace("https","wss")+"/realtime/v1/websocket?apikey="+SB_KEY+"&vsn=1.0.0");
   let hbInterval=null;
-  ws.onopen=()=>{ws.send(JSON.stringify({topic:"realtime:public:tr_public_profiles",event:"phx_join",payload:{},ref:"1"}));hbInterval=setInterval(()=>ws.send(JSON.stringify({topic:"phoenix",event:"heartbeat",payload:{},ref:"hb"})),25000);};
-  ws.onmessage=e=>{try{const msg=JSON.parse(e.data);if(msg.event==="INSERT"||msg.event==="UPDATE"||msg.event==="DELETE"){onUpdate(msg.payload);}}catch(err){}};
+  ws.onopen=()=>{
+    ws.send(JSON.stringify({topic:"realtime:public:tr_public_profiles",event:"phx_join",payload:{},ref:"1"}));
+    hbInterval=setInterval(()=>ws.send(JSON.stringify({topic:"phoenix",event:"heartbeat",payload:{},ref:"hb"})),25000);
+  };
+  ws.onmessage=e=>{
+    try{
+      const msg=JSON.parse(e.data);
+      if(msg.event==="INSERT"||msg.event==="UPDATE"||msg.event==="DELETE"){
+        onUpdate(msg.payload);
+      }
+    }catch(err){}
+  };
   ws.onerror=()=>{};
   return()=>{clearInterval(hbInterval);try{ws.close();}catch(e){}};
 }
 
-const SK={data:"tr-d1",log:"tr-l1",backup:"tr-b1",hobby:"tr-h1",following:"tr-f1",skip:"tr-skip",dname:"tr-name"};
+const SK={data:"tr-d1",paints:"tr-p1",log:"tr-l1",backup:"tr-b1",hobby:"tr-h1",following:"tr-f1",skip:"tr-skip",dname:"tr-name"};
 const lsGet=(k,d)=>{try{const r=localStorage.getItem(k);return r?JSON.parse(r):d;}catch(e){return d;}};
 const lsSet=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v));}catch(e){}};
 
+const DEF_PAINTS=[{id:"p1",brand:"Citadel",type:"Base",name:"Macragge Blue",owned:true},{id:"p2",brand:"Citadel",type:"Base",name:"Abaddon Black",owned:true},{id:"p3",brand:"Citadel",type:"Base",name:"Leadbelcher",owned:true},{id:"p4",brand:"Citadel",type:"Shade",name:"Nuln Oil",owned:true},{id:"p5",brand:"Citadel",type:"Shade",name:"Agrax Earthshade",owned:true},{id:"p6",brand:"Citadel",type:"Layer",name:"Calgar Blue",owned:true},{id:"p7",brand:"Citadel",type:"Layer",name:"Fenrisian Grey",owned:true},{id:"p8",brand:"Citadel",type:"Dry",name:"Ironbreaker",owned:true},{id:"p9",brand:"Citadel",type:"Contrast",name:"Blood Angels Red",owned:false},{id:"p10",brand:"Vallejo",type:"Model Color",name:"Flat Black",owned:true},{id:"p11",brand:"Army Painter",type:"Primer",name:"Matt Black",owned:true}];
 const DEF_DATA={projects:[]};
+
 const SC={new_in_box:{label:"New in Box",color:T.accent,bg:T.accentLight},unbuilt:{label:"Unbuilt",color:T.yellow,bg:T.yellowDim},built:{label:"Built",color:T.blue,bg:T.blueDim},painted:{label:"Painted",color:T.green,bg:T.greenDim}};
 const ICONS={new_in_box:"📦",unbuilt:"🔩",built:"🔧",painted:"🎨"};
 const SCYCLE=["new_in_box","unbuilt","built","painted"];
@@ -102,56 +233,76 @@ async function parseImp(file){try{const raw=JSON.parse(await toTxt(file));const 
 
 function useAuth(){
   const [sess,setSess]=useState(undefined);
+  const tcRef=useRef(null);
+
+  // Restore session from localStorage on mount
   useEffect(()=>{
-    const hash=window.location.hash;
-    if(hash&&hash.includes("access_token")){
-      const params=new URLSearchParams(hash.replace("#","?"));
-      const accessToken=params.get("access_token");
-      const expiresIn=parseInt(params.get("expires_in")||"3600");
-      if(accessToken){const email=jwtEmail(accessToken);if(email){_sbJwt=accessToken;const exp=Date.now()+expiresIn*1000-60000;lsSet(TKEY,{token:accessToken,email,expiresAt:exp,sbJwt:accessToken});setSess({token:accessToken,email});window.history.replaceState(null,"",window.location.pathname+window.location.search);return;}}
-    }
     const s=lsGet(TKEY,null);
-    if(s&&s.expiresAt>Date.now()){if(s.sbJwt){_sbJwt=s.sbJwt;}setSess({token:s.token,email:s.email});}else{lsSet(TKEY,null);setSess(null);}
+    if(s&&s.expiresAt>Date.now()){setSess({token:s.token,email:s.email});}
+    else{lsSet(TKEY,null);setSess(null);}
   },[]);
-  useEffect(()=>{const t=setInterval(()=>{const s=lsGet(TKEY,null);if(s&&s.expiresAt&&s.expiresAt<Date.now()){lsSet(TKEY,null);_sbJwt=null;setSess(null);}},30000);return()=>clearInterval(t);},[]);
-  const signIn=useCallback(()=>{const redirectTo=encodeURIComponent("https://tabletop-ready.com");window.location.href=SB_URL+"/auth/v1/authorize?provider=google&redirect_to="+redirectTo;},[]);
-  const signOut=useCallback(()=>{lsSet(TKEY,null);_sbJwt=null;setSess(null);},[]);
+
+  // Token expiry check every 30s
+  useEffect(()=>{
+    const t=setInterval(()=>{
+      const s=lsGet(TKEY,null);
+      if(s&&s.expiresAt&&s.expiresAt<Date.now()){lsSet(TKEY,null);setSess(null);}
+    },30000);
+    return()=>clearInterval(t);
+  },[]);
+
+  // Init Google OAuth token client (sign-in only, no Drive scope needed)
+  useEffect(()=>{
+    let tries=0;
+    const init=()=>{
+      if(window.google&&window.google.accounts&&window.google.accounts.oauth2){
+        tcRef.current=window.google.accounts.oauth2.initTokenClient({
+          client_id:GID,
+          scope:GSCOPE,
+          callback:async resp=>{
+            if(resp.error)return;
+            const tok=resp.access_token;
+            const exp=Date.now()+(resp.expires_in||3600)*1000-60000;
+            const email=await gEmail(tok);
+            if(!email)return;
+            // Try to get a Supabase JWT (best case — enables RLS)
+            await sbSignIn(tok);
+            lsSet(TKEY,{token:tok,email,expiresAt:exp});
+            setSess({token:tok,email});sbSetEmail(email);
+          }
+        });
+      } else if(tries<50){tries++;setTimeout(init,100);}
+    };
+    init();
+  },[]);
+
+  const signIn=useCallback(()=>{if(tcRef.current)tcRef.current.requestAccessToken({prompt:"consent"});},[]);
+  const signOut=useCallback(()=>{
+    const s=lsGet(TKEY,null);
+    if(s&&s.token&&window.google&&window.google.accounts&&window.google.accounts.oauth2){
+      window.google.accounts.oauth2.revoke(s.token,()=>{});
+    }
+    lsSet(TKEY,null);
+    _sbJwt=null;
+    setSess(null);
+  },[]);
+
   return{sess,signIn,signOut};
 }
-
-// ── usePaints: now loads from Supabase paints + user_paints tables ────────────
-function usePaints(sess){
-  const [paints,setPaints]=useState([]);
-  const [paintsLoaded,setPaintsLoaded]=useState(false);
-  const userEmail=sess&&sess.email;
-  useEffect(()=>{
-    setPaintsLoaded(false);
-    (async()=>{
-      const masterList=await sbLoadAllPaints();
-      if(!masterList.length){
-        // Fallback to old localStorage cache if Supabase unreachable
-        const cached=lsGet("tr-p1",null)||lsGet("cq-paints-v1",null)||lsGet("mr-paints-v1",null);
-        if(cached){setPaints(cached);setPaintsLoaded(true);return;}
-        setPaints([]);setPaintsLoaded(true);return;
-      }
-      let owned={};
-      if(userEmail){owned=await sbLoadUserPaints(userEmail);}
-      setPaints(masterList.map(p=>({...p,owned:owned[p.id]===true})));
-      setPaintsLoaded(true);
-    })();
-  },[userEmail]);
-  const togP=async(paintId)=>{
-    const paint=paints.find(p=>p.id===paintId);
-    if(!paint)return;
-    const newOwned=!paint.owned;
-    setPaints(ps=>ps.map(p=>p.id===paintId?{...p,owned:newOwned}:p));
-    if(userEmail){await sbTogglePaint(userEmail,paintId,newOwned);}
-  };
-  const addP=p=>{const np={...p,id:"local-"+nid(),owned:p.owned!==undefined?p.owned:true};setPaints(ps=>[...ps,np]);return np;};
-  const delP=id=>{if(!String(id).startsWith("local-"))return;setPaints(ps=>ps.filter(p=>p.id!==id));};
-  return{paints,setPaints,addP,delP,togP,paintsLoaded};
+function usePaints(){
+  const [paints,setPaints]=useState(()=>{
+    const fresh=lsGet(SK.paints,null);
+    if(fresh)return fresh;
+    const old=lsGet("cq-paints-v1",null)||lsGet("mr-paints-v1",null);
+    if(old)return old;
+    return DEF_PAINTS;
+  });
+  useEffect(()=>{lsSet(SK.paints,paints);},[paints]);
+  const addP=p=>{const np={...p,id:"p"+nid(),owned:p.owned!==undefined?p.owned:true};setPaints(ps=>[...ps,np]);return np;};
+  const delP=id=>setPaints(ps=>ps.filter(p=>p.id!==id));
+  const togP=id=>setPaints(ps=>ps.map(p=>p.id===id?{...p,owned:!p.owned}:p));
+  return{paints,setPaints,addP,delP,togP};
 }
-
 function useLog(){
   const [log,setLog]=useState(()=>lsGet(SK.log,[]));
   useEffect(()=>{lsSet(SK.log,log);},[log]);
@@ -166,33 +317,82 @@ const Inp=({label,mb,...p})=><Field label={label} mb={mb}><input {...p} style={{
 const Txt=({label,...p})=><Field label={label}><textarea {...p} style={{...IS,resize:"vertical",minHeight:80,lineHeight:1.5,...p.style}}/></Field>;
 const Sel=({label,children,...p})=><Field label={label}><select {...p} style={{...IS,cursor:"pointer",appearance:"none",WebkitAppearance:"none"}}>{children}</select></Field>;
 function Btn({v="pri",sm,children,sx={},...p}){
-  const M={pri:{background:T.accent,color:"#fff",border:"none",boxShadow:"0 1px 3px rgba(91,106,240,0.35)"},sec:{background:T.bg2,color:T.text2,border:"1px solid "+T.border},del:{background:"transparent",color:T.red,border:"1px solid "+T.red+"30"},ok:{background:T.greenDim,color:T.green,border:"1px solid "+T.green+"30"},blue:{background:T.blueDim,color:T.blue,border:"1px solid "+T.blue+"30"},orange:{background:"rgba(234,88,12,0.10)",color:T.orange,border:"1px solid "+T.orange+"30"}};
+  const M={
+    pri:{background:T.accent,color:"#fff",border:"none",boxShadow:"0 1px 3px rgba(91,106,240,0.35)"},
+    sec:{background:T.bg2,color:T.text2,border:"1px solid "+T.border},
+    del:{background:"transparent",color:T.red,border:"1px solid "+T.red+"30"},
+    ok:{background:T.greenDim,color:T.green,border:"1px solid "+T.green+"30"},
+    blue:{background:T.blueDim,color:T.blue,border:"1px solid "+T.blue+"30"},
+    orange:{background:"rgba(234,88,12,0.10)",color:T.orange,border:"1px solid "+T.orange+"30"},
+  };
   return <button {...p} style={{padding:sm?"6px 13px":"11px 18px",borderRadius:12,cursor:"pointer",fontWeight:600,fontSize:sm?12:14,fontFamily:"inherit",transition:"opacity 0.12s,transform 0.12s",...M[v],...sx}} onMouseDown={e=>e.currentTarget.style.transform="scale(0.97)"} onMouseUp={e=>e.currentTarget.style.transform=""} onMouseLeave={e=>e.currentTarget.style.transform=""}>{children}</button>;
 }
-function Badge({status,count}){const c=SC[status]||{label:status,color:T.text3,bg:T.bg2};return <span style={{display:"inline-flex",alignItems:"center",gap:5,background:c.bg,color:c.color,borderRadius:20,padding:"4px 10px",fontSize:12,fontWeight:600,whiteSpace:"nowrap"}}><span style={{fontSize:13}}>{ICONS[status]||""}</span>{count!=null?<span>{count}</span>:<span>{c.label}</span>}</span>;}
+function Badge({status,count}){
+  const c=SC[status]||{label:status,color:T.text3,bg:T.bg2};
+  return <span style={{display:"inline-flex",alignItems:"center",gap:5,background:c.bg,color:c.color,borderRadius:20,padding:"4px 10px",fontSize:12,fontWeight:600,whiteSpace:"nowrap"}}>
+    <span style={{fontSize:13}}>{ICONS[status]||""}</span>
+    {count!=null?<span>{count}</span>:<span>{c.label}</span>}
+  </span>;
+}
 function Bar({stats}){if(!stats||!stats.total)return null;return <div style={{display:"flex",gap:2,height:6,borderRadius:6,overflow:"hidden",margin:"10px 0 6px"}}>{Object.entries(SC).map(([k,c])=>stats[k]>0&&<div key={k} title={c.label+": "+stats[k]} style={{flex:stats[k],background:c.color}}/>)}</div>;}
-function Modal({title,onClose,children,wide}){return <div style={{position:"fixed",inset:0,background:"rgba(15,20,35,0.5)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:300}} onClick={onClose}><div style={{background:T.bg1,borderRadius:"20px 20px 0 0",padding:"20px 20px 28px",width:"100%",maxWidth:wide?680:520,maxHeight:"92vh",overflowY:"auto",boxShadow:"0 -8px 40px rgba(0,0,0,0.18)"}} onClick={e=>e.stopPropagation()}><div style={{width:36,height:4,borderRadius:2,background:T.border2,margin:"0 auto 18px"}}/><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}><h3 style={{margin:0,color:T.text,fontSize:17,fontWeight:700}}>{title}</h3><button onClick={onClose} style={{background:T.bg2,border:"none",borderRadius:"50%",width:30,height:30,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",color:T.text3,fontSize:16}}>x</button></div>{children}</div></div>;}
+function Modal({title,onClose,children,wide}){
+  return <div style={{position:"fixed",inset:0,background:"rgba(15,20,35,0.5)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:300,padding:"0"}} onClick={onClose}>
+    <div style={{background:T.bg1,borderRadius:"20px 20px 0 0",padding:"20px 20px 28px",width:"100%",maxWidth:wide?680:520,maxHeight:"92vh",overflowY:"auto",boxShadow:"0 -8px 40px rgba(0,0,0,0.18)"}} onClick={e=>e.stopPropagation()}>
+      <div style={{width:36,height:4,borderRadius:2,background:T.border2,margin:"0 auto 18px",flexShrink:0}}/>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
+        <h3 style={{margin:0,color:T.text,fontSize:17,fontWeight:700}}>{title}</h3>
+        <button onClick={onClose} style={{background:T.bg2,border:"none",borderRadius:"50%",width:30,height:30,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",color:T.text3,fontSize:16}}>x</button>
+      </div>
+      {children}
+    </div>
+  </div>;
+}
 function TabBar({tabs,active,onChange}){return <div style={{display:"flex",gap:3,background:T.bg2,borderRadius:14,padding:4,marginBottom:16}}>{tabs.map(t=><button key={t.id} onClick={()=>onChange(t.id)} style={{flex:1,padding:"9px 8px",borderRadius:10,border:"none",cursor:"pointer",fontWeight:active===t.id?700:500,fontSize:13,fontFamily:"inherit",background:active===t.id?"#fff":"transparent",color:active===t.id?T.text:T.text3,boxShadow:active===t.id?T.shadow:"none",transition:"all 0.15s"}}>{t.label}</button>)}</div>;}
 
 let _uid=0;
-function PhotoSlot({label,value,onChange}){
+function PhotoSlot({label,value,onChange,onUpload,uploading}){
   const [id]=useState(()=>"ps-"+(++_uid));
   return <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:6,flex:1}}>
     <div style={{fontSize:11,fontWeight:700,color:T.text3,letterSpacing:"0.04em",textTransform:"uppercase"}}>{label}</div>
     <div style={{position:"relative",width:"100%",aspectRatio:"1",borderRadius:12,overflow:"hidden",background:T.bg2,border:"1px solid "+T.border}}>
-      {value?<><img src={value} alt={label} style={{width:"100%",height:"100%",objectFit:"cover",display:"block"}}/><button onClick={()=>onChange(null)} style={{position:"absolute",top:4,right:4,background:"rgba(0,0,0,0.6)",border:"none",borderRadius:"50%",width:22,height:22,cursor:"pointer",color:"#fff",fontSize:12,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700}}>x</button></>
-      :<label htmlFor={id} style={{width:"100%",height:"100%",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:4,color:T.text3}}><span style={{fontSize:22}}>+</span><span style={{fontSize:11}}>Add {label}</span><input id={id} type="file" accept="image/*" capture="environment" style={{display:"none"}} onChange={async e=>{if(e.target.files&&e.target.files[0]){const b=await toB64(e.target.files[0]);onChange(b);e.target.value=";"}}} /></label>}
+      {uploading&&<div style={{position:"absolute",inset:0,background:"rgba(255,255,255,0.85)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:2,fontSize:11,color:T.accent,fontWeight:700}}>Uploading...</div>}
+      {value?<><img src={value} alt={label} style={{width:"100%",height:"100%",objectFit:"cover",display:"block"}}/><button onClick={()=>onChange(null)} style={{position:"absolute",top:4,right:4,background:"rgba(0,0,0,0.6)",border:"none",borderRadius:"50%",width:22,height:22,cursor:"pointer",color:"#fff",fontSize:12,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,zIndex:3}}>x</button></>
+      :<label htmlFor={id} style={{width:"100%",height:"100%",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:4,color:T.text3}}><span style={{fontSize:22}}>+</span><span style={{fontSize:11}}>Add {label}</span><input id={id} type="file" accept="image/*" capture="environment" style={{display:"none"}} onChange={async e=>{if(e.target.files&&e.target.files[0]){if(onUpload){await onUpload(e.target.files[0]);}else{const b=await toB64(e.target.files[0]);onChange(b);}e.target.value=";"}}} /></label>}
     </div>
   </div>;
 }
-function MultiPhoto({photos,onChange}){const ph=(photos&&typeof photos==="object"&&!Array.isArray(photos))?photos:{before:null,wip:null,after:null};const upd=(k,v)=>onChange({...ph,[k]:v});return <Field label="Photos - Before / WIP / After"><div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}><PhotoSlot label="Before" value={ph.before} onChange={v=>upd("before",v)}/><PhotoSlot label="WIP" value={ph.wip} onChange={v=>upd("wip",v)}/><PhotoSlot label="After" value={ph.after} onChange={v=>upd("after",v)}/></div></Field>;}
-
+function MultiPhoto({photos,onChange,sess,projectId,unitId}){
+  const ph=(photos&&typeof photos==="object"&&!Array.isArray(photos))?photos:{before:null,wip:null,after:null};
+  const [uploading,setUploading]=useState({});
+  const upd=(k,v)=>onChange({...ph,[k]:v});
+  async function handleUpload(slot,file){
+    if(sess&&sess.email&&projectId&&unitId){
+      setUploading(u=>({...u,[slot]:true}));
+      const url=await sbUploadPhoto(sess.email,projectId,unitId,slot,file);
+      setUploading(u=>({...u,[slot]:false}));
+      if(url){upd(slot,url);return;}
+    }
+    const b=await toB64(file);upd(slot,b);
+  }
+  async function handleRemove(slot){
+    const url=ph[slot];
+    if(url&&url.startsWith("http"))await sbDeletePhoto(url);
+    upd(slot,null);
+  }
+  return <Field label="Photos - Before / WIP / After">
+    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
+      {["before","wip","after"].map(slot=><PhotoSlot key={slot} label={slot.charAt(0).toUpperCase()+slot.slice(1)} value={ph[slot]} uploading={!!uploading[slot]} onChange={()=>handleRemove(slot)} onUpload={f=>handleUpload(slot,f)}/>)}
+    </div>
+    {sess&&sess.email?<div style={{fontSize:11,color:T.green,marginTop:6,textAlign:"center"}}>Photos upload to cloud — visible to followers ✓</div>:<div style={{fontSize:11,color:T.text3,marginTop:6,textAlign:"center"}}>Sign in to upload photos to cloud</div>}
+  </Field>;
+}
 function PaintPicker({step,onChange,paints,addP}){
   const brands=useMemo(()=>[...new Set(paints.map(p=>p.brand))].sort(),[paints]);
   const types=useMemo(()=>{const src=step.brand?paints.filter(p=>p.brand===step.brand):paints;return[...new Set(src.map(p=>p.type))].sort();},[paints,step.brand]);
   const list=useMemo(()=>paints.filter(p=>(!step.brand||p.brand===step.brand)&&(!step.type||p.type===step.type)).sort((a,b)=>a.name.localeCompare(b.name)),[paints,step.brand,step.type]);
   const own=useMemo(()=>step.paint&&paints.find(p=>p.name===step.paint&&(!step.brand||p.brand===step.brand)),[paints,step]);
-  const [sav,setSav]=useState(false);const [nn,setNn]=useState("");
+  const [sav,setSav]=useState(false);
+  const [nn,setNn]=useState("");
   function doSave(){if(!nn.trim())return;addP({brand:step.brand||"Unknown",type:step.type||"Unknown",name:nn.trim(),owned:true});onChange({...step,paint:nn.trim()});setSav(false);setNn("");}
   const ss={...IS,padding:"8px 10px",fontSize:13};
   return <div style={{display:"flex",flexDirection:"column",gap:6}}>
@@ -221,15 +421,42 @@ function StepRow({step,idx,onChange,onDelete,paints,addP}){
 }
 
 function RecipeCard({recipe,onEdit,onDelete,onPaint,readOnly}){
-  const [exp,setExp]=useState(false);const steps=Array.isArray(recipe.steps)?recipe.steps:[];
+  const [exp,setExp]=useState(false);
+  const steps=Array.isArray(recipe.steps)?recipe.steps:[];
   return <div style={{background:T.bg1,borderRadius:16,marginBottom:10,boxShadow:T.shadow,overflow:"hidden"}}>
+    {/* Header row - always visible */}
     <div style={{padding:"14px 16px",display:"flex",alignItems:"center",gap:12}}>
       <div style={{width:40,height:40,borderRadius:12,background:T.accentDim,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0}}>🎨</div>
-      <div style={{flex:1,minWidth:0,cursor:"pointer"}} onClick={()=>setExp(e=>!e)}><div style={{fontWeight:700,fontSize:15,color:T.text,lineHeight:1.2}}>{recipe.name}</div><div style={{fontSize:12,color:T.text3,marginTop:2}}>{steps.length} step{steps.length!==1?"s":""}{steps.length>0&&" · tap to "+(exp?"collapse":"expand")}</div></div>
-      {!readOnly&&<div style={{display:"flex",gap:6,flexShrink:0}}>{steps.length>0&&<Btn sm v="blue" onClick={()=>onPaint(recipe)}>▶ Paint</Btn>}<Btn sm v="sec" onClick={()=>onEdit(recipe)}>Edit</Btn><button onClick={()=>onDelete(recipe.id)} style={{background:"none",border:"none",cursor:"pointer",color:T.text3,fontSize:18,width:28,height:28,display:"flex",alignItems:"center",justifyContent:"center"}}>x</button></div>}
+      <div style={{flex:1,minWidth:0,cursor:"pointer"}} onClick={()=>setExp(e=>!e)}>
+        <div style={{fontWeight:700,fontSize:15,color:T.text,lineHeight:1.2}}>{recipe.name}</div>
+        <div style={{fontSize:12,color:T.text3,marginTop:2}}>{steps.length} step{steps.length!==1?"s":""} {steps.length>0&&"· tap to "+(exp?"collapse":"expand")}</div>
+      </div>
+      {!readOnly&&<div style={{display:"flex",gap:6,flexShrink:0}}>
+        {steps.length>0&&<Btn sm v="blue" onClick={()=>onPaint(recipe)}>▶ Paint</Btn>}
+        <Btn sm v="sec" onClick={()=>onEdit(recipe)}>Edit</Btn>
+        <button onClick={()=>onDelete(recipe.id)} style={{background:"none",border:"none",cursor:"pointer",color:T.text3,fontSize:18,width:28,height:28,display:"flex",alignItems:"center",justifyContent:"center"}}>x</button>
+      </div>}
     </div>
-    {steps.length>0&&!exp&&<div style={{padding:"0 16px 14px",display:"flex",gap:6,flexWrap:"wrap"}}>{steps.map((s,i)=>{const col=SCOLS[i%SCOLS.length];return <div key={i} style={{display:"flex",alignItems:"center",gap:5,background:col+"12",borderRadius:20,padding:"4px 10px"}}><div style={{width:6,height:6,borderRadius:"50%",background:col,flexShrink:0}}/><span style={{fontSize:12,color:col,fontWeight:600}}>{s.phase}</span>{s.paint&&<span style={{fontSize:12,color:T.text2}}>· {s.paint}</span>}</div>;})}</div>}
-    {exp&&<div style={{borderTop:"1px solid "+T.border,padding:"12px 16px 14px",display:"flex",flexDirection:"column",gap:8}}>{steps.map((s,i)=>{const col=SCOLS[i%SCOLS.length];return <div key={i} style={{display:"flex",alignItems:"flex-start",gap:12}}><div style={{width:24,height:24,borderRadius:8,background:col+"18",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:700,color:col,flexShrink:0,marginTop:1}}>{i+1}</div><div style={{flex:1,minWidth:0}}><div style={{fontSize:14}}><span style={{color:T.text3,fontWeight:600,fontSize:12}}>{s.phase} </span><span style={{color:T.text,fontWeight:600}}>{s.paint||<em style={{color:T.text3}}>No paint selected</em>}</span></div>{(s.brand||s.type)&&<div style={{fontSize:12,color:T.text3,marginTop:1}}>{[s.brand,s.type].filter(Boolean).join(" · ")}</div>}{s.notes&&<div style={{fontSize:12,color:T.text2,marginTop:3,fontStyle:"italic"}}>{s.notes}</div>}</div></div>;})} {steps.length===0&&<div style={{fontSize:13,color:T.text3}}>No steps yet.</div>}</div>}
+    {/* Compact step pills - always shown */}
+    {steps.length>0&&!exp&&<div style={{padding:"0 16px 14px",display:"flex",gap:6,flexWrap:"wrap"}}>
+      {steps.map((s,i)=>{const col=SCOLS[i%SCOLS.length];return <div key={i} style={{display:"flex",alignItems:"center",gap:5,background:col+"12",borderRadius:20,padding:"4px 10px"}}>
+        <div style={{width:6,height:6,borderRadius:"50%",background:col,flexShrink:0}}/>
+        <span style={{fontSize:12,color:col,fontWeight:600}}>{s.phase}</span>
+        {s.paint&&<span style={{fontSize:12,color:T.text2}}>· {s.paint}</span>}
+      </div>;})}
+    </div>}
+    {/* Expanded full detail */}
+    {exp&&<div style={{borderTop:"1px solid "+T.border,padding:"12px 16px 14px",display:"flex",flexDirection:"column",gap:8}}>
+      {steps.map((s,i)=>{const col=SCOLS[i%SCOLS.length];return <div key={i} style={{display:"flex",alignItems:"flex-start",gap:12}}>
+        <div style={{width:24,height:24,borderRadius:8,background:col+"18",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:700,color:col,flexShrink:0,marginTop:1}}>{i+1}</div>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{fontSize:14}}><span style={{color:T.text3,fontWeight:600,fontSize:12}}>{s.phase} </span><span style={{color:T.text,fontWeight:600}}>{s.paint||<em style={{color:T.text3}}>No paint selected</em>}</span></div>
+          {(s.brand||s.type)&&<div style={{fontSize:12,color:T.text3,marginTop:1}}>{[s.brand,s.type].filter(Boolean).join(" · ")}</div>}
+          {s.notes&&<div style={{fontSize:12,color:T.text2,marginTop:3,fontStyle:"italic"}}>{s.notes}</div>}
+        </div>
+      </div>;})}
+      {steps.length===0&&<div style={{fontSize:13,color:T.text3}}>No steps yet.</div>}
+    </div>}
   </div>;
 }
 
@@ -252,9 +479,13 @@ function RecipeModal({recipe,onSave,onClose,paints,addP}){
 }
 
 function PaintMode({recipe,onClose,paints}){
-  const steps=recipe.steps||[];const [idx,setIdx]=useState(0);const [done,setDone]=useState(new Set());
+  const steps=recipe.steps||[];
+  const [idx,setIdx]=useState(0);
+  const [done,setDone]=useState(new Set());
   if(!steps.length)return null;
-  const step=steps[idx];const col=SCOLS[idx%SCOLS.length];const allDone=done.size===steps.length;
+  const step=steps[idx];
+  const col=SCOLS[idx%SCOLS.length];
+  const allDone=done.size===steps.length;
   const own=step&&paints.find(p=>p.name===step.paint&&(!step.brand||p.brand===step.brand));
   const markDone=()=>{setDone(d=>new Set([...d,idx]));if(idx<steps.length-1)setIdx(i=>i+1);};
   return <div style={{position:"fixed",inset:0,background:T.bg0,zIndex:400,display:"flex",flexDirection:"column",fontFamily:"inherit"}}>
@@ -277,64 +508,124 @@ function PaintMode({recipe,onClose,paints}){
         {own&&<div style={{marginTop:8,fontSize:13,fontWeight:700,color:own.owned?T.green:T.red}}>{own.owned?"You own this":"You need to buy this"}</div>}
       </div>
       {step.notes&&<div style={{background:T.yellow+"14",border:"1px solid "+T.yellow+"30",borderRadius:10,padding:"12px 14px",marginBottom:16,fontSize:13,color:T.text2,lineHeight:1.6}}>Note: {step.notes}</div>}
-      {allDone?<div style={{textAlign:"center",padding:"20px 0"}}><div style={{fontSize:30,marginBottom:12}}>All done!</div><div style={{fontSize:18,fontWeight:900,color:T.green,marginBottom:8}}>Recipe Complete!</div><Btn onClick={onClose} sx={{width:"100%"}}>Done</Btn></div>
-      :<button onClick={markDone} style={{width:"100%",background:done.has(idx)?T.bg2:T.accent,color:done.has(idx)?T.text2:"#fff",border:"1px solid "+(done.has(idx)?T.border:"transparent"),borderRadius:12,padding:"16px",fontSize:16,fontWeight:900,cursor:"pointer",fontFamily:"inherit"}}>{done.has(idx)?"Done - tap to re-mark":"Step Complete"}</button>}
+      {allDone
+        ?<div style={{textAlign:"center",padding:"20px 0"}}><div style={{fontSize:30,marginBottom:12}}>All done!</div><div style={{fontSize:18,fontWeight:900,color:T.green,marginBottom:8}}>Recipe Complete!</div><Btn onClick={onClose} sx={{width:"100%"}}>Done</Btn></div>
+        :<button onClick={markDone} style={{width:"100%",background:done.has(idx)?T.bg2:T.accent,color:done.has(idx)?T.text2:"#fff",border:"1px solid "+(done.has(idx)?T.border:"transparent"),borderRadius:12,padding:"16px",fontSize:16,fontWeight:900,cursor:"pointer",fontFamily:"inherit"}}>{done.has(idx)?"Done - tap to re-mark":"Step Complete"}</button>
+      }
     </div>
     <div style={{display:"flex",gap:8,padding:"16px",borderTop:"1px solid "+T.border,paddingBottom:"calc(16px + env(safe-area-inset-bottom))"}}><Btn v="sec" onClick={()=>setIdx(i=>i-1)} sx={{flex:1,opacity:idx===0?0.4:1}} disabled={idx===0}>Prev</Btn><Btn v="sec" onClick={()=>setIdx(i=>i+1)} sx={{flex:1,opacity:idx===steps.length-1?0.4:1}} disabled={idx===steps.length-1}>Next</Btn></div>
   </div>;
 }
 
 function UnitCardMenu({unit,onEdit,onDelete,onSplit,onDupe}){
-  const [open,setOpen]=useState(false);const ref=useRef();
+  const [open,setOpen]=useState(false);
+  const ref=useRef();
   useEffect(()=>{if(!open)return;const h=e=>{if(ref.current&&!ref.current.contains(e.target))setOpen(false);};document.addEventListener("mousedown",h);document.addEventListener("touchstart",h,{passive:true});return()=>{document.removeEventListener("mousedown",h);document.removeEventListener("touchstart",h);};},[open]);
   return <div ref={ref} style={{position:"relative",flexShrink:0}}>
-    <button onClick={()=>setOpen(o=>!o)} style={{background:"none",border:"none",cursor:"pointer",padding:"4px",color:T.text3,borderRadius:8,display:"flex",alignItems:"center",justifyContent:"center",width:32,height:32}}><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg></button>
+    <button onClick={()=>setOpen(o=>!o)} style={{background:"none",border:"none",cursor:"pointer",padding:"4px",color:T.text3,borderRadius:8,display:"flex",alignItems:"center",justifyContent:"center",width:32,height:32}}>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>
+    </button>
     {open&&<div style={{position:"absolute",right:0,top:"calc(100% + 4px)",background:T.bg1,borderRadius:14,boxShadow:T.shadowMd,minWidth:160,zIndex:100,overflow:"hidden"}}>
-      {[{label:"Edit unit",icon:"✏️",action:()=>{onEdit(unit);setOpen(false);}},{label:"Duplicate",icon:"📋",action:()=>{onDupe(unit);setOpen(false);}},{label:"Split group",icon:"⚡",action:()=>{onSplit(unit);setOpen(false);}},{label:"Delete",icon:"🗑",action:()=>{onDelete(unit.id);setOpen(false);},del:true}].map((item,i)=><button key={i} onClick={item.action} style={{width:"100%",background:"none",border:"none",padding:"12px 16px",display:"flex",alignItems:"center",gap:10,cursor:"pointer",textAlign:"left",fontFamily:"inherit",fontSize:14,color:item.del?T.red:T.text,fontWeight:500,borderBottom:i<3?"1px solid "+T.border:"none"}}><span style={{fontSize:16,width:20,flexShrink:0}}>{item.icon}</span>{item.label}</button>)}
+      {[
+        {label:"Edit unit",icon:"✏️",action:()=>{onEdit(unit);setOpen(false);}},
+        {label:"Duplicate",icon:"📋",action:()=>{onDupe(unit);setOpen(false);}},
+        {label:"Split group",icon:"⚡",action:()=>{onSplit(unit);setOpen(false);}},
+        {label:"Delete",icon:"🗑",action:()=>{onDelete(unit.id);setOpen(false);},del:true},
+      ].map((item,i)=><button key={i} onClick={item.action} style={{width:"100%",background:"none",border:"none",padding:"12px 16px",display:"flex",alignItems:"center",gap:10,cursor:"pointer",textAlign:"left",fontFamily:"inherit",fontSize:14,color:item.del?T.red:T.text,fontWeight:500,borderBottom:i<3?"1px solid "+T.border:"none"}}>
+        <span style={{fontSize:16,width:20,flexShrink:0}}>{item.icon}</span>{item.label}
+      </button>)}
     </div>}
   </div>;
 }
 
 function UnitCard({unit,onEdit,onDelete,onStatus,onSplit,onDupe,onUpdateSubgroups}){
   const next=()=>{const i=SCYCLE.indexOf(unit.status);return SCYCLE[(i+1)%SCYCLE.length];};
-  const ph=safeP(unit);const shots=[{k:"before",l:"Before",v:ph.before},{k:"wip",l:"WIP",v:ph.wip},{k:"after",l:"After",v:ph.after}].filter(s=>s.v);
+  const ph=safeP(unit);
+  const shots=[{k:"before",l:"Before",v:ph.before},{k:"wip",l:"WIP",v:ph.wip},{k:"after",l:"After",v:ph.after}].filter(s=>s.v);
   return <div style={{background:T.bg1,borderRadius:16,padding:"14px 16px",marginBottom:10,boxShadow:T.shadow}}>
-    {shots.length>0&&<div style={{display:"flex",gap:6,marginBottom:12}}>{shots.map(s=><div key={s.k} style={{position:"relative",flexShrink:0}}><img src={s.v} alt={s.l} style={{width:64,height:64,objectFit:"cover",borderRadius:10,display:"block"}}/><div style={{position:"absolute",bottom:3,left:3,background:"rgba(0,0,0,0.6)",borderRadius:4,padding:"2px 5px",fontSize:9,color:"#fff",fontWeight:600,letterSpacing:"0.04em"}}>{s.l}</div></div>)}</div>}
+    {shots.length>0&&<div style={{display:"flex",gap:6,marginBottom:12}}>
+      {shots.map(s=><div key={s.k} style={{position:"relative",flexShrink:0}}>
+        <img src={s.v} alt={s.l} style={{width:64,height:64,objectFit:"cover",borderRadius:10,display:"block"}}/>
+        <div style={{position:"absolute",bottom:3,left:3,background:"rgba(0,0,0,0.6)",borderRadius:4,padding:"2px 5px",fontSize:9,color:"#fff",fontWeight:600,letterSpacing:"0.04em"}}>{s.l}</div>
+      </div>)}
+    </div>}
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8,marginBottom:10}}>
-      <div style={{flex:1,minWidth:0}}><div style={{fontWeight:700,fontSize:16,color:T.text,lineHeight:1.2,marginBottom:2,letterSpacing:"-0.01em"}}>{unit.name}</div><div style={{fontSize:13,color:T.text3}}>{unit.models} model{unit.models!==1?"s":""}</div></div>
+      <div style={{flex:1,minWidth:0}}>
+        <div style={{fontWeight:700,fontSize:16,color:T.text,lineHeight:1.2,marginBottom:2,letterSpacing:"-0.01em"}}>{unit.name}</div>
+        <div style={{fontSize:13,color:T.text3}}>{unit.models} model{unit.models!==1?"s":""}</div>
+      </div>
       <UnitCardMenu unit={unit} onEdit={onEdit} onDelete={onDelete} onSplit={onSplit} onDupe={onDupe}/>
     </div>
-    <div style={{display:"flex",alignItems:"center",gap:8}}><button onClick={()=>onStatus(unit.id,next())} style={{background:"none",border:"none",padding:0,cursor:"pointer",flexShrink:0}}><Badge status={unit.status}/></button><span style={{fontSize:12,color:T.text3}}>Tap to update</span></div>
+    <div style={{display:"flex",alignItems:"center",gap:8}}>
+      <button onClick={()=>onStatus(unit.id,next())} style={{background:"none",border:"none",padding:0,cursor:"pointer",flexShrink:0}}><Badge status={unit.status}/></button>
+      <span style={{fontSize:12,color:T.text3}}>Tap to update</span>
+    </div>
     {unit.subgroups&&unit.subgroups.length>0&&<div style={{marginTop:8,borderTop:"1px solid "+T.border,paddingTop:8}}>
       <div style={{fontSize:11,color:T.text3,fontWeight:700,textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:6}}>Groups — tap badge to update, x to remove</div>
-      {unit.subgroups.map((sg,i)=>{const nextSt=()=>{const idx=SCYCLE.indexOf(sg.status);return SCYCLE[(idx+1)%SCYCLE.length];};return <div key={i} style={{display:"flex",alignItems:"center",gap:8,marginBottom:6,paddingLeft:8,borderLeft:"3px solid "+(SC[sg.status]?SC[sg.status].color:T.border)}}><span style={{fontSize:13,fontWeight:700,color:T.text,minWidth:24}}>{sg.models}x</span><button onClick={()=>{const sgs=unit.subgroups.map((s,j)=>j===i?{...s,status:nextSt()}:s);onStatus&&onUpdateSubgroups(unit.id,sgs);}} style={{background:"none",border:"none",padding:0,cursor:"pointer"}}><Badge status={sg.status}/></button><button onClick={()=>{const sgs=unit.subgroups.filter((_,j)=>j!==i);onUpdateSubgroups(unit.id,sgs.length?sgs:null);}} style={{background:"none",border:"none",color:T.text3,cursor:"pointer",fontSize:16,marginLeft:"auto",padding:"2px 6px"}}>x</button></div>;})}
+      {unit.subgroups.map((sg,i)=>{
+        const nextSt=()=>{const idx=SCYCLE.indexOf(sg.status);return SCYCLE[(idx+1)%SCYCLE.length];};
+        return <div key={i} style={{display:"flex",alignItems:"center",gap:8,marginBottom:6,paddingLeft:8,borderLeft:"3px solid "+(SC[sg.status]?SC[sg.status].color:T.border)}}>
+          <span style={{fontSize:13,fontWeight:700,color:T.text,minWidth:24}}>{sg.models}x</span>
+          <button onClick={()=>{const sgs=unit.subgroups.map((s,j)=>j===i?{...s,status:nextSt()}:s);onStatus&&onUpdateSubgroups(unit.id,sgs);}} style={{background:"none",border:"none",padding:0,cursor:"pointer"}}><Badge status={sg.status}/></button>
+          <button onClick={()=>{const sgs=unit.subgroups.filter((_,j)=>j!==i);onUpdateSubgroups(unit.id,sgs.length?sgs:null);}} style={{background:"none",border:"none",color:T.text3,cursor:"pointer",fontSize:16,marginLeft:"auto",padding:"2px 6px"}}>x</button>
+        </div>;
+      })}
     </div>}
     {unit.notes&&<div style={{marginTop:8,fontSize:12,color:T.text2,lineHeight:1.55,borderLeft:"2px solid "+T.border,paddingLeft:8,whiteSpace:"pre-wrap"}}>{unit.notes}</div>}
   </div>;
 }
 
 function SplitModal({unit,onSave,onClose}){
-  const [countStr,setCountStr]=useState(String(Math.floor(unit.models/2)));const [stat,setStat]=useState("built");
-  const count=parseInt(countStr)||0;const rem=unit.models-count;const valid=count>=1&&count<unit.models;
-  function save(){if(!valid)return;const sgs=[{id:nid(),models:count,status:stat},{id:nid(),models:rem,status:unit.status}];onSave({...unit,subgroups:sgs});onClose();}
+  const [countStr,setCountStr]=useState(String(Math.floor(unit.models/2)));
+  const [stat,setStat]=useState("built");
+  const count=parseInt(countStr)||0;
+  const rem=unit.models-count;
+  const valid=count>=1&&count<unit.models;
+  function save(){
+    if(!valid)return;
+    // Replace subgroups entirely with a fresh split - cleaner than appending
+    const sgs=[{id:nid(),models:count,status:stat},{id:nid(),models:rem,status:unit.status}];
+    onSave({...unit,subgroups:sgs});
+    onClose();
+  }
   return <Modal title={"Split: "+unit.name} onClose={onClose}>
-    <div style={{background:T.bg2,borderRadius:10,padding:"12px",marginBottom:14,fontSize:13,color:T.text2,lineHeight:1.6}}>Split this unit into two groups with different statuses.</div>
-    <Field label={"Models in first group (of "+unit.models+")"}><input type="number" min={1} max={unit.models-1} value={countStr} onChange={e=>setCountStr(e.target.value)} onBlur={e=>{const v=parseInt(e.target.value);if(!v||v<1)setCountStr("1");else if(v>=unit.models)setCountStr(String(unit.models-1));else setCountStr(String(v));}} style={{...IS,fontSize:16}}/></Field>
-    <Sel label="Status for first group" value={stat} onChange={e=>setStat(e.target.value)}>{Object.entries(SC).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}</Sel>
-    <div style={{background:T.bg2,borderRadius:10,padding:"10px 12px",marginBottom:14,fontSize:13}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}><span style={{color:T.text2}}>Group 1:</span><span style={{fontWeight:700,color:SC[stat]?SC[stat].color:T.text}}>{valid?count:"?"}x {SC[stat]?SC[stat].label:stat}</span></div><div style={{display:"flex",justifyContent:"space-between"}}><span style={{color:T.text2}}>Group 2:</span><span style={{fontWeight:700,color:SC[unit.status]?SC[unit.status].color:T.text}}>{valid?rem:"?"}x {SC[unit.status]?SC[unit.status].label:unit.status}</span></div></div>
+    <div style={{background:T.bg2,borderRadius:10,padding:"12px",marginBottom:14,fontSize:13,color:T.text2,lineHeight:1.6}}>
+      Split this unit into two groups with different statuses — e.g. 3 Painted and 7 Built.
+    </div>
+    <Field label={"Models in first group (of "+unit.models+")"}>
+      <input
+        type="number" min={1} max={unit.models-1}
+        value={countStr}
+        onChange={e=>setCountStr(e.target.value)}
+        onBlur={e=>{const v=parseInt(e.target.value);if(!v||v<1)setCountStr("1");else if(v>=unit.models)setCountStr(String(unit.models-1));else setCountStr(String(v));}}
+        style={{...IS,fontSize:16}}
+      />
+    </Field>
+    <Sel label="Status for first group" value={stat} onChange={e=>setStat(e.target.value)}>
+      {Object.entries(SC).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
+    </Sel>
+    <div style={{background:T.bg2,borderRadius:10,padding:"10px 12px",marginBottom:14,fontSize:13}}>
+      <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}><span style={{color:T.text2}}>Group 1:</span><span style={{fontWeight:700,color:SC[stat]?SC[stat].color:T.text}}>{valid?count:"?"}x {SC[stat]?SC[stat].label:stat}</span></div>
+      <div style={{display:"flex",justifyContent:"space-between"}}><span style={{color:T.text2}}>Group 2:</span><span style={{fontWeight:700,color:SC[unit.status]?SC[unit.status].color:T.text}}>{valid?rem:"?"}x {SC[unit.status]?SC[unit.status].label:unit.status}</span></div>
+    </div>
     {!valid&&<div style={{fontSize:12,color:T.red,marginBottom:12}}>Enter a number between 1 and {unit.models-1}.</div>}
     <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}><Btn v="sec" sm onClick={onClose}>Cancel</Btn><Btn sm onClick={save} disabled={!valid} sx={{opacity:valid?1:0.4}}>Split</Btn></div>
   </Modal>;
 }
 
 function SettingsMenu({items,primary}){
-  const [open,setOpen]=useState(false);const ref=useRef();
+  const [open,setOpen]=useState(false);
+  const ref=useRef();
   useEffect(()=>{if(!open)return;const h=e=>{if(ref.current&&!ref.current.contains(e.target))setOpen(false);};document.addEventListener("mousedown",h);document.addEventListener("touchstart",h);return()=>{document.removeEventListener("mousedown",h);document.removeEventListener("touchstart",h);};},[open]);
   return <div style={{display:"flex",alignItems:"center",gap:4}}>
     {primary&&<button onClick={primary.action} style={{background:T.accent,color:"#fff",border:"none",borderRadius:20,padding:"6px 14px",fontSize:13,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap",fontFamily:"inherit"}}>{primary.label}</button>}
     {items&&items.length>0&&<div ref={ref} style={{position:"relative"}}>
-      <button onClick={()=>setOpen(o=>!o)} style={{background:open?T.bg2:"none",border:"1px solid "+(open?T.border:"transparent"),borderRadius:10,width:34,height:34,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",color:T.text2}}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/></svg></button>
-      {open&&<div style={{position:"absolute",top:"calc(100% + 6px)",right:0,background:T.bg1,border:"1px solid "+T.border,borderRadius:14,minWidth:200,boxShadow:"0 8px 24px rgba(0,0,0,0.12)",zIndex:200,overflow:"hidden"}}>{items.map((item,i)=><button key={i} onClick={()=>{item.action();setOpen(false);}} style={{width:"100%",background:"none",border:"none",borderBottom:i<items.length-1?"1px solid "+T.border:"none",padding:"13px 16px",display:"flex",alignItems:"center",gap:12,cursor:"pointer",textAlign:"left",fontFamily:"inherit",fontSize:14,color:T.text,fontWeight:500}}><span style={{fontSize:16,width:22,textAlign:"center",flexShrink:0}}>{item.icon}</span>{item.label}</button>)}</div>}
+      <button onClick={()=>setOpen(o=>!o)} style={{background:open?T.bg2:"none",border:"1px solid "+(open?T.border:"transparent"),borderRadius:10,width:34,height:34,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",color:T.text2}}>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/></svg>
+      </button>
+      {open&&<div style={{position:"absolute",top:"calc(100% + 6px)",right:0,background:T.bg1,border:"1px solid "+T.border,borderRadius:14,minWidth:200,boxShadow:"0 8px 24px rgba(0,0,0,0.12)",zIndex:200,overflow:"hidden"}}>
+        {items.map((item,i)=><button key={i} onClick={()=>{item.action();setOpen(false);}} style={{width:"100%",background:"none",border:"none",borderBottom:i<items.length-1?"1px solid "+T.border:"none",padding:"13px 16px",display:"flex",alignItems:"center",gap:12,cursor:"pointer",textAlign:"left",fontFamily:"inherit",fontSize:14,color:T.text,fontWeight:500}}><span style={{fontSize:16,width:22,textAlign:"center",flexShrink:0}}>{item.icon}</span>{item.label}</button>)}
+      </div>}
     </div>}
   </div>;
 }
@@ -351,7 +642,13 @@ function Login({onSignIn,onSkip}){
     </div>
   </div>;
 }
-function SessionBanner({onSignIn}){return <div style={{background:T.yellow+"18",border:"1px solid "+T.yellow+"40",borderRadius:12,padding:"12px 16px",margin:"10px 15px",display:"flex",justifyContent:"space-between",alignItems:"center",gap:12}}><div><div style={{fontSize:13,fontWeight:700,color:T.yellow}}>Session expired</div><div style={{fontSize:12,color:T.text3,marginTop:2}}>Tap to sign in again - your data is safe.</div></div><button onClick={onSignIn} style={{background:T.accent,color:"#fff",border:"none",borderRadius:10,padding:"8px 14px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>Sign in</button></div>;}
+
+function SessionBanner({onSignIn}){
+  return <div style={{background:T.yellow+"18",border:"1px solid "+T.yellow+"40",borderRadius:12,padding:"12px 16px",margin:"10px 15px",display:"flex",justifyContent:"space-between",alignItems:"center",gap:12}}>
+    <div><div style={{fontSize:13,fontWeight:700,color:T.yellow}}>Session expired</div><div style={{fontSize:12,color:T.text3,marginTop:2}}>Tap to sign in again - your data is safe.</div></div>
+    <button onClick={onSignIn} style={{background:T.accent,color:"#fff",border:"none",borderRadius:10,padding:"8px 14px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>Sign in</button>
+  </div>;
+}
 
 function Account({sess,status,err,onOut,onClose}){
   const dot={synced:T.green,syncing:T.blue,error:T.red,idle:T.text3}[status]||T.text3;
@@ -363,7 +660,7 @@ function Account({sess,status,err,onOut,onClose}){
     </div>
     <div style={{flex:1,padding:"16px 15px",maxWidth:680,margin:"0 auto",width:"100%"}}>
       <div style={{background:"#fff",borderRadius:16,padding:"16px",marginBottom:14,boxShadow:T.shadow}}><div style={{fontSize:11,color:T.text3,letterSpacing:"0.06em",textTransform:"uppercase",fontWeight:700,marginBottom:8}}>Signed in as</div><div style={{fontSize:15,fontWeight:700,color:T.text}}>{sess?sess.email:"Unknown"}</div></div>
-      <div style={{background:"#fff",borderRadius:16,padding:"16px",marginBottom:14,boxShadow:T.shadow,display:"flex",justifyContent:"space-between",alignItems:"center"}}><div><div style={{fontSize:11,color:T.text3,letterSpacing:"0.06em",textTransform:"uppercase",fontWeight:700,marginBottom:4}}>Cloud Sync</div><div style={{fontSize:13,color:T.text2}}>Projects and paint ownership synced to Supabase.</div></div><div style={{display:"flex",alignItems:"center",gap:6,flexShrink:0,marginLeft:10}}><div style={{width:8,height:8,borderRadius:"50%",background:dot}}/><span style={{fontSize:13,fontWeight:700,color:dot}}>{lbl}</span></div></div>
+      <div style={{background:"#fff",borderRadius:16,padding:"16px",marginBottom:14,boxShadow:T.shadow,display:"flex",justifyContent:"space-between",alignItems:"center"}}><div><div style={{fontSize:11,color:T.text3,letterSpacing:"0.06em",textTransform:"uppercase",fontWeight:700,marginBottom:4}}>Cloud Sync</div><div style={{fontSize:13,color:T.text2}}>Stored privately in your Google Drive.</div></div><div style={{display:"flex",alignItems:"center",gap:6,flexShrink:0,marginLeft:10}}><div style={{width:8,height:8,borderRadius:"50%",background:dot}}/><span style={{fontSize:13,fontWeight:700,color:dot}}>{lbl}</span></div></div>
       {err&&<div style={{background:T.red+"10",border:"1px solid "+T.red+"25",borderRadius:10,padding:"12px 14px",marginBottom:14,fontSize:12,color:T.red}}>{err}</div>}
       <div style={{background:T.blue+"10",border:"1px solid "+T.blue+"25",borderRadius:10,padding:"12px 14px",marginBottom:20,fontSize:13,color:T.text2,lineHeight:1.7}}>Sign in with the same Google account on another device to sync your data.</div>
       <Btn v="del" onClick={onOut} sx={{width:"100%"}}>Sign Out</Btn>
@@ -371,41 +668,39 @@ function Account({sess,status,err,onOut,onClose}){
   </div>;
 }
 
-// ── PaintLibrary: reads from Supabase master list, no "Add Paint" form ────────
-function PaintLibrary({paints,addP,delP,togP,onClose,paintsLoaded}){
+function PaintLibrary({paints,addP,delP,togP,onClose,onNav}){
+  const [form,setForm]=useState({brand:"",type:"",name:"",owned:true});
   const [search,setSearch]=useState("");
-  const [showUnowned,setShowUnowned]=useState(false);
-  const ownedCount=paints.filter(p=>p.owned).length;
-  const unownedCount=paints.filter(p=>!p.owned).length;
-  const filtered=useMemo(()=>{let r=paints.filter(p=>(p.name+" "+p.brand+" "+p.type).toLowerCase().includes(search.toLowerCase()));if(showUnowned)r=r.filter(p=>!p.owned);return r;},[paints,search,showUnowned]);
+  const [showBuy,setShowBuy]=useState(false);
+  const needCount=paints.filter(p=>!p.owned).length;
+  const filtered=useMemo(()=>{let r=paints.filter(p=>(p.name+" "+p.brand+" "+p.type).toLowerCase().includes(search.toLowerCase()));if(showBuy)r=r.filter(p=>!p.owned);return r;},[paints,search,showBuy]);
   const grouped=useMemo(()=>{const g={};filtered.forEach(p=>{const k=p.brand||"Unknown";if(!g[k])g[k]={};const t=p.type||"Uncategorised";if(!g[k][t])g[k][t]=[];g[k][t].push(p);});return g;},[filtered]);
+  function save(){if(!form.name.trim())return;addP({...form,name:form.name.trim()});setForm(f=>({...f,name:""}));}
   return <div style={{minHeight:"100dvh",background:T.bg0,fontFamily:"inherit",display:"flex",flexDirection:"column"}}>
     <div style={{borderBottom:"1px solid "+T.border,padding:"calc(14px + env(safe-area-inset-top)) 15px 13px",display:"flex",alignItems:"center",gap:10,background:T.bg1,position:"sticky",top:0,zIndex:50}}>
       <button onClick={onClose} style={{background:"none",border:"none",color:T.text2,cursor:"pointer",fontSize:20,width:36,height:36,display:"flex",alignItems:"center",justifyContent:"center",borderRadius:10}}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg></button>
       <div style={{flex:1}}><div style={{fontSize:11,fontWeight:800,color:T.text3,letterSpacing:"0.10em",textTransform:"uppercase"}}>TABLETOP READY</div><h1 style={{margin:0,fontSize:16,fontWeight:800,color:T.text}}>🎨 Paint Library</h1></div>
-      <span style={{fontSize:13,color:T.text3}}>{paintsLoaded?ownedCount+"/"+paints.length:"..."}</span>
+      <span style={{fontSize:13,color:T.text3}}>{paints.length} paints</span>
     </div>
-    <div style={{flex:1,overflowY:"auto",padding:"12px 15px",maxWidth:680,margin:"0 auto",width:"100%",paddingBottom:"calc(80px + env(safe-area-inset-bottom))"}}>
-      {!paintsLoaded&&<div style={{textAlign:"center",padding:"60px 20px",color:T.text3}}><div style={{fontSize:32,marginBottom:12}}>🎨</div><div style={{fontSize:14}}>Loading paint library...</div></div>}
-      {paintsLoaded&&<>
-        <div style={{background:T.blue+"10",border:"1px solid "+T.blue+"25",borderRadius:10,padding:"10px 14px",marginBottom:12,fontSize:12,color:T.text2,lineHeight:1.5}}>Tap ○ to mark paints as owned. Your collection syncs automatically when signed in.</div>
-        {unownedCount>0&&<div style={{background:T.bg1,border:"1px solid "+T.border,borderRadius:10,padding:"10px 14px",marginBottom:12,display:"flex",justifyContent:"space-between",alignItems:"center"}}><span style={{fontSize:13,color:T.text2}}>{unownedCount} not owned</span><Btn sm v="sec" onClick={()=>setShowUnowned(n=>!n)}>{showUnowned?"Show all":"Show unowned"}</Btn></div>}
-        <div style={{position:"relative",marginBottom:14}}><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search paints..." style={{...IS,paddingLeft:30}}/>{search&&<button onClick={()=>setSearch("")} style={{position:"absolute",right:8,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",color:T.text3,cursor:"pointer",fontSize:18}}>x</button>}</div>
-        {Object.entries(grouped).map(([brand,types])=><div key={brand} style={{marginBottom:12}}>
-          <div style={{fontSize:12,color:T.accent,fontWeight:800,letterSpacing:"0.06em",textTransform:"uppercase",marginBottom:6}}>{brand}</div>
-          {Object.entries(types).map(([type,ps])=><div key={type} style={{background:"#fff",borderRadius:14,marginBottom:8,boxShadow:T.shadow,overflow:"hidden"}}>
-            <div style={{padding:"6px 12px",fontSize:11,color:T.text3,fontWeight:700,letterSpacing:"0.06em",textTransform:"uppercase",background:T.bg2,borderBottom:"1px solid "+T.border}}>{type} · {ps.filter(p=>p.owned).length}/{ps.length} owned</div>
-            {ps.map(p=><div key={p.id} style={{display:"flex",alignItems:"center",padding:"9px 12px",borderBottom:"1px solid "+T.border}}>
-              <button onClick={()=>togP(p.id)} style={{background:"none",border:"none",cursor:"pointer",fontSize:16,padding:0,width:28,height:28,flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center"}}>{p.owned?"✅":"○"}</button>
-              <span style={{fontSize:13,color:p.owned?T.text:T.text3,marginLeft:8,flex:1}}>{p.name}</span>
-            </div>)}
-          </div>)}
-        </div>)}
-        {filtered.length===0&&<div style={{textAlign:"center",color:T.text3,padding:"40px 0",fontSize:13}}>No paints match.</div>}
-      </>}
+    <div style={{flex:1,overflowY:"auto",padding:"12px 15px",maxWidth:680,margin:"0 auto",width:"100%",paddingBottom:"24px"}}>
+      {needCount>0&&<div style={{background:T.red+"10",border:"1px solid "+T.red+"25",borderRadius:10,padding:"10px 14px",marginBottom:14,display:"flex",justifyContent:"space-between",alignItems:"center"}}><span style={{fontSize:13,color:T.red}}>{needCount} paint{needCount!==1?"s":""} to buy</span><Btn sm v="sec" onClick={()=>setShowBuy(n=>!n)}>{showBuy?"Show all":"Shopping list"}</Btn></div>}
+      <div style={{background:"#fff",borderRadius:18,padding:"16px",marginBottom:16,boxShadow:T.shadow}}>
+        <div style={{fontSize:11,color:T.text3,fontWeight:700,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:10}}>Add Paint</div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}><Inp label="Brand" mb={0} placeholder="Citadel..." value={form.brand} onChange={e=>setForm(f=>({...f,brand:e.target.value}))}/><Inp label="Type" mb={0} placeholder="Base, Shade..." value={form.type} onChange={e=>setForm(f=>({...f,type:e.target.value}))}/></div>
+        <div style={{display:"flex",gap:8,alignItems:"flex-end",marginBottom:8}}><Inp label="Name" mb={0} placeholder="e.g. Macragge Blue" value={form.name} onChange={e=>setForm(f=>({...f,name:e.target.value}))} style={{flex:1}} onKeyDown={e=>e.key==="Enter"&&save()}/><Btn sm onClick={save} sx={{flexShrink:0,height:38}}>Add</Btn></div>
+        <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:13,color:T.text2}}><input type="checkbox" checked={form.owned} onChange={e=>setForm(f=>({...f,owned:e.target.checked}))} style={{width:16,height:16,accentColor:T.accent}}/>I own this paint</label>
+      </div>
+      <div style={{position:"relative",marginBottom:14}}><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search paints..." style={{...IS,paddingLeft:30}}/>{search&&<button onClick={()=>setSearch("")} style={{position:"absolute",right:8,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",color:T.text3,cursor:"pointer",fontSize:18}}>x</button>}</div>
+      {Object.entries(grouped).map(([brand,types])=><div key={brand} style={{marginBottom:12}}><div style={{fontSize:12,color:T.accent,fontWeight:800,letterSpacing:"0.06em",textTransform:"uppercase",marginBottom:6}}>{brand}</div>{Object.entries(types).map(([type,ps])=><div key={type} style={{background:"#fff",borderRadius:14,marginBottom:8,boxShadow:T.shadow,overflow:"hidden"}}><div style={{padding:"6px 12px",fontSize:11,color:T.text3,fontWeight:700,letterSpacing:"0.06em",textTransform:"uppercase",background:T.bg2,borderBottom:"1px solid "+T.border}}>{type}</div>{ps.map(p=><div key={p.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"9px 12px",borderBottom:"1px solid "+T.border}}><div style={{display:"flex",alignItems:"center",gap:10}}><button onClick={()=>togP(p.id)} style={{background:"none",border:"none",cursor:"pointer",fontSize:16,padding:0,width:24,height:24,flexShrink:0}}>{p.owned?"✅":"○"}</button><span style={{fontSize:13,color:p.owned?T.text:T.text3}}>{p.name}</span></div><button onClick={()=>delP(p.id)} style={{background:"none",border:"none",color:T.text3,cursor:"pointer",fontSize:16,padding:0,width:28,height:28,display:"flex",alignItems:"center",justifyContent:"center"}}>x</button></div>)}</div>)}</div>)}
+      {filtered.length===0&&<div style={{textAlign:"center",color:T.text3,padding:"40px 0",fontSize:13}}>{search||showBuy?"No paints match.":"No paints yet!"}</div>}
     </div>
+    {/* Bottom nav */}
     <div style={{position:"fixed",bottom:0,left:0,right:0,background:"#fff",borderTop:"1px solid "+T.border,display:"flex",zIndex:100,paddingBottom:"env(safe-area-inset-bottom)"}}>
-      {[{id:"dashboard",icon:"📊",label:"Dashboard"},{id:"projects",icon:"⚔️",label:"Projects"},{id:"following",icon:"👥",label:"Following"},{id:"paints",icon:"🎨",label:"Paints"}].map(({id,icon,label})=><button key={id} onClick={()=>onClose(id)} style={{flex:1,padding:"10px 4px 9px",background:"none",border:"none",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:3,opacity:id==="paints"?1:0.45}}><span style={{fontSize:18}}>{icon}</span><span style={{fontSize:9,fontWeight:700,letterSpacing:"0.06em",textTransform:"uppercase",color:id==="paints"?T.accent:T.text3,fontFamily:"inherit"}}>{label}</span>{id==="paints"&&<div style={{width:18,height:2,borderRadius:1,background:T.accent,marginTop:1}}/>}</button>)}
+      {[{id:"dashboard",icon:"📊",label:"Dashboard"},{id:"projects",icon:"⚔️",label:"Projects"},{id:"following",icon:"👥",label:"Following"},{id:"paints",icon:"🎨",label:"Paints"}].map(({id,icon,label})=><button key={id} onClick={()=>onClose(id)} style={{flex:1,padding:"10px 4px 9px",background:"none",border:"none",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:3,opacity:id==="paints"?1:0.45}}>
+        <span style={{fontSize:18}}>{icon}</span>
+        <span style={{fontSize:9,fontWeight:700,letterSpacing:"0.06em",textTransform:"uppercase",color:id==="paints"?T.accent:T.text3,fontFamily:"inherit"}}>{label}</span>
+        {id==="paints"&&<div style={{width:18,height:2,borderRadius:1,background:T.accent,marginTop:1}}/>}
+      </button>)}
     </div>
   </div>;
 }
@@ -420,8 +715,7 @@ function ShoppingList({data,paints,onClose}){
       <span style={{fontSize:13,color:T.red,fontWeight:700}}>{needed.length} paints</span>
     </div>
     <div style={{flex:1,overflowY:"auto",padding:"12px 15px 40px",maxWidth:680,margin:"0 auto",width:"100%"}}>
-      {needed.length===0?<div style={{textAlign:"center",padding:"60px 20px",color:T.text3}}><div style={{fontSize:36,marginBottom:12}}>🎉</div><div style={{fontSize:16,fontWeight:700,color:T.green,marginBottom:8}}>You own everything!</div><div style={{fontSize:14}}>All recipe paints are owned.</div></div>
-      :Object.entries(grouped).map(([brand,ps])=><div key={brand} style={{marginBottom:14}}><div style={{fontSize:12,fontWeight:800,color:T.accent,letterSpacing:"0.06em",textTransform:"uppercase",marginBottom:8}}>{brand}</div><div style={{background:T.bg1,border:"1px solid "+T.border,borderRadius:14,overflow:"hidden"}}>{ps.map((p,i)=><div key={i} style={{padding:"12px 16px",borderBottom:i<ps.length-1?"1px solid "+T.border:"none",display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}><div><div style={{fontSize:14,fontWeight:700,color:T.text}}>{p.name}</div>{p.type&&<div style={{fontSize:12,color:T.text3,marginTop:1}}>{p.type}</div>}</div><div style={{fontSize:11,color:T.text3,textAlign:"right",flexShrink:0}}>{p.projects.slice(0,2).join(", ")}{p.projects.length>2?" +more":""}</div></div>)}</div></div>)}
+      {needed.length===0?<div style={{textAlign:"center",padding:"60px 20px",color:T.text3}}><div style={{fontSize:36,marginBottom:12}}>🎉</div><div style={{fontSize:16,fontWeight:700,color:T.green,marginBottom:8}}>You own everything!</div><div style={{fontSize:14}}>All recipe paints are owned.</div></div>:Object.entries(grouped).map(([brand,ps])=><div key={brand} style={{marginBottom:14}}><div style={{fontSize:12,fontWeight:800,color:T.accent,letterSpacing:"0.06em",textTransform:"uppercase",marginBottom:8}}>{brand}</div><div style={{background:T.bg1,border:"1px solid "+T.border,borderRadius:14,overflow:"hidden"}}>{ps.map((p,i)=><div key={i} style={{padding:"12px 16px",borderBottom:i<ps.length-1?"1px solid "+T.border:"none",display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}><div><div style={{fontSize:14,fontWeight:700,color:T.text}}>{p.name}</div>{p.type&&<div style={{fontSize:12,color:T.text3,marginTop:1}}>{p.type}</div>}</div><div style={{fontSize:11,color:T.text3,textAlign:"right",flexShrink:0}}>{p.projects.slice(0,2).join(", ")}{p.projects.length>2?" +more":""}</div></div>)}</div></div>)}
     </div>
   </div>;
 }
@@ -520,7 +814,11 @@ function ShareDBModal({data,sess,onClose}){
 
 function ImportModal({onClose,onImport}){
   const [fid]=useState(()=>"imp-"+(++_uid));
-  const [state,setState]=useState("idle");const [error,setError]=useState("");const [preview,setPreview]=useState(null);const [selected,setSelected]=useState(new Set());const [mode,setMode]=useState("add");
+  const [state,setState]=useState("idle");
+  const [error,setError]=useState("");
+  const [preview,setPreview]=useState(null);
+  const [selected,setSelected]=useState(new Set());
+  const [mode,setMode]=useState("add");
   async function handleFile(e){const file=e.target.files&&e.target.files[0];if(!file)return;setState("loading");const r=await parseImp(file);if(!r.ok){setError(r.error);setState("error");return;}setPreview(r.projects);setSelected(new Set(r.projects.map((_,i)=>i)));setState("preview");e.target.value="";}
   function toggle(i){setSelected(s=>{const n=new Set(s);n.has(i)?n.delete(i):n.add(i);return n;});}
   function doImport(){const chosen=preview.filter((_,i)=>selected.has(i));if(!chosen.length)return;onImport(chosen,mode);onClose();}
@@ -537,12 +835,16 @@ function ImportModal({onClose,onImport}){
   </Modal>;
 }
 
-function BackupBanner({onExport,onDismiss}){return <div style={{background:T.yellow+"18",border:"1px solid "+T.yellow+"40",borderRadius:10,padding:"10px 14px",margin:"8px 15px 0",maxWidth:680,marginLeft:"auto",marginRight:"auto",display:"flex",justifyContent:"space-between",alignItems:"center",gap:10}}><div><div style={{fontSize:13,fontWeight:700,color:T.yellow}}>Time to back up</div><div style={{fontSize:12,color:T.text3,marginTop:2}}>7+ days since your last backup.</div></div><div style={{display:"flex",gap:6,flexShrink:0}}><Btn sm v="ok" onClick={onExport}>Backup</Btn><Btn sm v="sec" onClick={onDismiss}>Later</Btn></div></div>;}
+function BackupBanner({onExport,onDismiss}){
+  return <div style={{background:T.yellow+"18",border:"1px solid "+T.yellow+"40",borderRadius:10,padding:"10px 14px",margin:"8px 15px 0",maxWidth:680,marginLeft:"auto",marginRight:"auto",display:"flex",justifyContent:"space-between",alignItems:"center",gap:10}}><div><div style={{fontSize:13,fontWeight:700,color:T.yellow}}>Time to back up</div><div style={{fontSize:12,color:T.text3,marginTop:2}}>7+ days since your last backup.</div></div><div style={{display:"flex",gap:6,flexShrink:0}}><Btn sm v="ok" onClick={onExport}>Backup</Btn><Btn sm v="sec" onClick={onDismiss}>Later</Btn></div></div>;
+}
 
 function SharedDB({payload,onBack}){
-  const ps=payload.projects||[];const [exp,setExp]=useState(null);
+  const ps=payload.projects||[];
+  const [exp,setExp]=useState(null);
   const g=useMemo(()=>{const g={new_in_box:0,unbuilt:0,built:0,painted:0,total:0};ps.forEach(p=>{Object.keys(g).forEach(k=>g[k]+=(p.stats&&p.stats[k])||0);});return g;},[ps]);
-  const pp=g.total?Math.round(g.painted/g.total*100):0;const dp=g.total?Math.round((g.painted+(g.built||0))/g.total*100):0;
+  const pp=g.total?Math.round(g.painted/g.total*100):0;
+  const dp=g.total?Math.round((g.painted+(g.built||0))/g.total*100):0;
   const ranked=[...ps].map(p=>({...p,pct:p.stats&&p.stats.total?Math.round(p.stats.painted/p.stats.total*100):0})).sort((a,b)=>b.pct-a.pct);
   const backlog=ps.flatMap(p=>(p.backlog||[]).map(u=>({...u,project:p.name})));
   const card={background:"#fff",borderRadius:18,padding:"18px 20px",marginBottom:14,boxShadow:T.shadow};
@@ -553,20 +855,46 @@ function SharedDB({payload,onBack}){
       <div><h1 style={{margin:0,fontSize:16,fontWeight:900,color:T.accent}}>TABLETOP READY</h1><div style={{fontSize:13,color:T.text3,marginTop:2}}>{payload.by?payload.by+" - ":""}{ps.length} project{ps.length!==1?"s":""}</div></div>
     </div>
     <div style={{padding:"12px 15px 40px",maxWidth:680,margin:"0 auto"}}>
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14,marginTop:6}}>{[{label:"Total Models",val:g.total,color:T.accent},{label:"Painted",val:g.painted,color:T.green},{label:"Projects",val:ps.length,color:T.blue},{label:"% Painted",val:pp+"%",color:T.yellow}].map(({label,val,color})=><div key={label} style={{background:"#fff",border:"1px solid "+T.border,borderRadius:14,padding:"16px 18px"}}><div style={{fontSize:28,fontWeight:900,color,lineHeight:1}}>{val}</div><div style={{fontSize:11,color:T.text3,marginTop:4,textTransform:"uppercase",letterSpacing:"0.05em"}}>{label}</div></div>)}</div>
-      <div style={{...card,display:"flex",gap:16,alignItems:"center"}}><Donut stats={g} size={110}/><div style={{flex:1}}>{Object.entries(SC).map(([k,c])=><div key={k} style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}><div style={{width:26,height:26,borderRadius:8,background:c.bg,display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,flexShrink:0}}>{ICONS[k]}</div><div style={{flex:1,fontSize:13,color:T.text2}}>{c.label}</div><div style={{fontSize:15,fontWeight:800,color:c.color,minWidth:28,textAlign:"right"}}>{g[k]||0}</div></div>)}</div></div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14,marginTop:6}}>
+        {[{label:"Total Models",val:g.total,color:T.accent},{label:"Painted",val:g.painted,color:T.green},{label:"Projects",val:ps.length,color:T.blue},{label:"% Painted",val:pp+"%",color:T.yellow}].map(({label,val,color})=><div key={label} style={{background:"#fff",border:"1px solid "+T.border,borderRadius:14,padding:"16px 18px"}}><div style={{fontSize:28,fontWeight:900,color,lineHeight:1}}>{val}</div><div style={{fontSize:11,color:T.text3,marginTop:4,textTransform:"uppercase",letterSpacing:"0.05em"}}>{label}</div></div>)}
+      </div>
+      <div style={{...card,display:"flex",gap:16,alignItems:"center"}}>
+        <Donut stats={g} size={110}/>
+        <div style={{flex:1}}>{Object.entries(SC).map(([k,c])=><div key={k} style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}><div style={{width:26,height:26,borderRadius:8,background:c.bg,display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,flexShrink:0}}>{ICONS[k]}</div><div style={{flex:1,fontSize:13,color:T.text2}}>{c.label}</div><div style={{fontSize:15,fontWeight:800,color:c.color,minWidth:28,textAlign:"right"}}>{g[k]||0}</div></div>)}</div>
+      </div>
       <div style={card}><div style={{fontSize:12,color:T.text3,fontWeight:700,textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:12}}>Paint Progress</div>{[{label:"Painted",pct:pp,color:T.green},{label:"Assembled",pct:dp,color:T.blue}].map(({label,pct,color})=><div key={label} style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}><div style={{fontSize:12,color:T.text2,minWidth:80}}>{label}</div><div style={{flex:1,height:8,borderRadius:6,background:T.bg2,overflow:"hidden"}}><div style={{height:"100%",width:pct+"%",background:color,borderRadius:6}}/></div><div style={{fontSize:13,fontWeight:700,color,minWidth:36,textAlign:"right"}}>{pct}%</div></div>)}</div>
-      {ranked.length>0&&<div style={card}><div style={{fontSize:12,color:T.text3,fontWeight:700,textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:6}}>Projects</div><div style={{fontSize:12,color:T.text3,marginBottom:12}}>Tap to expand</div>{ranked.map((p,i)=>{const isOpen=exp===i;return <div key={i} style={{marginBottom:8,borderRadius:10,background:isOpen?T.bg2:"transparent"}}><div onClick={()=>setExp(isOpen?null:i)} style={{display:"flex",alignItems:"center",gap:10,cursor:"pointer",padding:isOpen?"10px 12px 6px":"0"}}><div style={{fontSize:13,color:T.text3,minWidth:20,fontWeight:700}}>#{i+1}</div><div style={{flex:1,minWidth:0}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:4}}><div style={{fontSize:13,fontWeight:700,color:T.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:"70%"}}>{p.name}</div><div style={{fontSize:13,color:T.green,fontWeight:700}}>{p.pct}%</div></div><div style={{display:"flex",gap:4,alignItems:"center"}}><div style={{flex:1,height:4,borderRadius:2,background:T.bg2,overflow:"hidden"}}><div style={{height:"100%",width:p.pct+"%",background:T.green,borderRadius:2}}/></div><div style={{fontSize:11,color:T.text3}}>{p.stats&&p.stats.total||0} models</div></div></div><span style={{fontSize:11,color:T.text3}}>{isOpen?"^":"v"}</span></div>{isOpen&&<div style={{padding:"4px 12px 12px"}}><div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:8}}>{Object.entries(SC).map(([k,c])=>p.stats&&p.stats[k]>0&&<div key={k} style={{fontSize:12,background:c.bg,color:c.color,fontWeight:700,borderRadius:20,padding:"3px 10px"}}>{ICONS[k]} {p.stats[k]}</div>)}</div><div style={{fontSize:13,color:T.text2,marginBottom:p.backlog&&p.backlog.length?8:0}}>{p.unitCount} units, {p.recipeCount} recipes</div>{p.backlog&&p.backlog.length>0&&<div><div style={{fontSize:11,color:T.text3,fontWeight:700,textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:6}}>Still to do</div>{p.backlog.map((u,j)=><div key={j} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"5px 0",borderBottom:j<p.backlog.length-1?"1px solid "+T.border:"none"}}><span style={{fontSize:13,color:T.text}}>{u.name}</span><div style={{display:"flex",alignItems:"center",gap:8}}><Badge status={u.status}/><span style={{fontSize:13,color:T.text2}}>{u.models}</span></div></div>)}</div>}</div>}</div>;})}</div>}
+      {ranked.length>0&&<div style={card}>
+        <div style={{fontSize:12,color:T.text3,fontWeight:700,textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:6}}>Projects</div>
+        <div style={{fontSize:12,color:T.text3,marginBottom:12}}>Tap to expand</div>
+        {ranked.map((p,i)=>{const isOpen=exp===i;return <div key={i} style={{marginBottom:8,borderRadius:10,background:isOpen?T.bg2:"transparent"}}>
+          <div onClick={()=>setExp(isOpen?null:i)} style={{display:"flex",alignItems:"center",gap:10,cursor:"pointer",padding:isOpen?"10px 12px 6px":"0"}}>
+            <div style={{fontSize:13,color:T.text3,minWidth:20,fontWeight:700}}>#{i+1}</div>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:4}}><div style={{fontSize:13,fontWeight:700,color:T.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:"70%"}}>{p.name}</div><div style={{fontSize:13,color:T.green,fontWeight:700}}>{p.pct}%</div></div>
+              <div style={{display:"flex",gap:4,alignItems:"center"}}><div style={{flex:1,height:4,borderRadius:2,background:T.bg2,overflow:"hidden"}}><div style={{height:"100%",width:p.pct+"%",background:T.green,borderRadius:2}}/></div><div style={{fontSize:11,color:T.text3}}>{p.stats&&p.stats.total||0} models</div></div>
+            </div>
+            <span style={{fontSize:11,color:T.text3}}>{isOpen?"^":"v"}</span>
+          </div>
+          {isOpen&&<div style={{padding:"4px 12px 12px"}}>
+            <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:8}}>{Object.entries(SC).map(([k,c])=>p.stats&&p.stats[k]>0&&<div key={k} style={{fontSize:12,background:c.bg,color:c.color,fontWeight:700,borderRadius:20,padding:"3px 10px"}}>{ICONS[k]} {p.stats[k]}</div>)}</div>
+            <div style={{fontSize:13,color:T.text2,marginBottom:p.backlog&&p.backlog.length?8:0}}>{p.unitCount} units, {p.recipeCount} recipes</div>
+            {p.backlog&&p.backlog.length>0&&<div><div style={{fontSize:11,color:T.text3,fontWeight:700,textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:6}}>Still to do</div>{p.backlog.map((u,j)=><div key={j} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"5px 0",borderBottom:j<p.backlog.length-1?"1px solid "+T.border:"none"}}><span style={{fontSize:13,color:T.text}}>{u.name}</span><div style={{display:"flex",alignItems:"center",gap:8}}><Badge status={u.status}/><span style={{fontSize:13,color:T.text2}}>{u.models}</span></div></div>)}</div>}
+          </div>}
+        </div>;})}
+      </div>}
       {backlog.length>0&&<div style={card}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}><div style={{fontSize:12,color:T.text3,fontWeight:700,textTransform:"uppercase",letterSpacing:"0.05em"}}>Backlog</div><div style={{fontSize:13,color:T.red,fontWeight:700}}>{backlog.reduce((a,u)=>a+u.models,0)} models</div></div>{backlog.slice(0,10).map((u,i)=><div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",paddingBottom:8,marginBottom:8,borderBottom:i<Math.min(backlog.length,10)-1?"1px solid "+T.bg2:"none"}}><div><div style={{fontSize:13,color:T.text,fontWeight:600}}>{u.name}</div><div style={{fontSize:12,color:T.text3}}>{u.project}</div></div><div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}><Badge status={u.status}/><span style={{fontSize:13,color:T.text2}}>{u.models}</span></div></div>)}{backlog.length>10&&<div style={{fontSize:12,color:T.text3,textAlign:"center"}}>+{backlog.length-10} more</div>}</div>}
     </div>
   </div>;
 }
 
 function SharedView({projects,by,onBack,onAdd}){
-  const [pidx,setPidx]=useState(null);const [tab,setTab]=useState("units");const p=pidx!==null?projects[pidx]:null;
+  const [pidx,setPidx]=useState(null);
+  const [tab,setTab]=useState("units");
+  const p=pidx!==null?projects[pidx]:null;
   const banner=<div style={{background:T.orange+"18",borderBottom:"1px solid "+T.orange+"35",padding:"7px 15px",textAlign:"center",fontSize:12,color:T.orange,fontWeight:700}}>READ-ONLY SHARED VIEW</div>;
   if(p){
-    const s=getStats(p);const shots2=p.units.flatMap(u=>{const ph=safeP(u);return[{img:ph.after,lbl:"After",u},{img:ph.wip,lbl:"WIP",u},{img:ph.before,lbl:"Before",u}].filter(s=>s.img);});
+    const s=getStats(p);
+    const shots2=p.units.flatMap(u=>{const ph=safeP(u);return[{img:ph.after,lbl:"After",u},{img:ph.wip,lbl:"WIP",u},{img:ph.before,lbl:"Before",u}].filter(s=>s.img);});
     return <div style={{minHeight:"100dvh",background:T.bg0,fontFamily:"inherit",color:T.text}}>
       {banner}
       <div style={{borderBottom:"1px solid "+T.border,padding:"12px 15px",display:"flex",alignItems:"center",gap:10,background:T.bg0,position:"sticky",top:0,zIndex:50}}>
@@ -596,17 +924,78 @@ function SharedView({projects,by,onBack,onAdd}){
 }
 
 function Following({onClose}){
-  const [list,setList]=useState(()=>lsGet(SK.following,[]));const [liveData,setLiveData]=useState({});const [addEmail,setAddEmail]=useState("");const [addErr,setAddErr]=useState("");const [viewing,setViewing]=useState(null);const [refreshing,setRefreshing]=useState(false);
+  const [list,setList]=useState(()=>lsGet(SK.following,[]));
+  const [liveData,setLiveData]=useState({}); // email -> latest profile from Supabase
+  const [addEmail,setAddEmail]=useState("");
+  const [addErr,setAddErr]=useState("");
+  const [viewing,setViewing]=useState(null);
+  const [refreshing,setRefreshing]=useState(false);
+
   useEffect(()=>{lsSet(SK.following,list);},[list]);
-  async function refreshAll(followList){const emails=followList.filter(e=>e.type==="supabase").map(e=>e.email);if(!emails.length)return;setRefreshing(true);const profiles=await sbGetProfiles(emails);const map={};profiles.forEach(p=>{map[p.user_id]=p;});setLiveData(map);setRefreshing(false);}
+
+  // Load latest data for all followed users from Supabase
+  async function refreshAll(followList){
+    const emails=followList.filter(e=>e.type==="supabase").map(e=>e.email);
+    if(!emails.length)return;
+    setRefreshing(true);
+    const profiles=await sbGetProfiles(emails);
+    const map={};
+    profiles.forEach(p=>{map[p.user_id]=p;});
+    setLiveData(map);
+    setRefreshing(false);
+  }
+
   useEffect(()=>{refreshAll(list);},[]);
-  useEffect(()=>{const emails=new Set(list.filter(e=>e.type==="supabase").map(e=>e.email));if(!emails.size)return;const unsub=sbSubscribeProfiles(payload=>{const row=payload.record||payload.new;if(row&&emails.has(row.user_id)){setLiveData(d=>({...d,[row.user_id]:row}));}});return unsub;},[list]);
+
+  // Realtime subscription — update liveData when any followed profile changes
+  useEffect(()=>{
+    const emails=new Set(list.filter(e=>e.type==="supabase").map(e=>e.email));
+    if(!emails.size)return;
+    const unsub=sbSubscribeProfiles(payload=>{
+      const row=payload.record||payload.new;
+      if(row&&emails.has(row.user_id)){
+        setLiveData(d=>({...d,[row.user_id]:row}));
+      }
+    });
+    return unsub;
+  },[list]);
+
   function initials(name){if(!name)return "?";return name.trim().split(" ").map(w=>w[0]).join("").toUpperCase().slice(0,2);}
   function acolor(name){const cols=[T.accent,T.blue,T.green,T.orange,T.yellow];return name?cols[name.charCodeAt(0)%cols.length]:T.text3;}
-  async function addFollow(){const raw=addEmail.trim().toLowerCase();if(!raw){setAddErr("Enter an email address.");return;}if(!raw.includes("@")){setAddErr("Enter the email address they use to sign in to Tabletop Ready.");return;}setAddErr("");setRefreshing(true);const profile=await sbGetProfile(raw);setRefreshing(false);if(!profile){setAddErr("No Tabletop Ready account found for that email. Make sure they have signed in and saved some data.");return;}if(list.some(e=>e.email===raw)){setAddErr("Already following that person.");return;}setList(f=>[...f,{type:"supabase",email:raw,by:profile.display_name||raw.split("@")[0],ts:Date.now()}]);setAddEmail("");setLiveData(d=>({...d,[raw]:profile}));}
+
+  async function addFollow(){
+    const raw=addEmail.trim();
+    if(!raw){setAddErr("Enter an email address.");return;}
+    // Validate it looks like an email
+    if(!raw.includes("@")){setAddErr("Enter the email address they use to sign in to Tabletop Ready.");return;}
+    setAddErr("");
+    setRefreshing(true);
+    const profile=await sbGetProfile(raw);
+    setRefreshing(false);
+    if(!profile){setAddErr("No Tabletop Ready account found for that email. Make sure they have signed in and saved some data.");return;}
+    if(list.some(e=>e.email===raw)){setAddErr("Already following that person.");return;}
+    setList(f=>[...f,{type:"supabase",email:raw,by:profile.display_name||raw.split("@")[0],ts:Date.now()}]);
+    setAddEmail("");
+    setLiveData(d=>({...d,[raw]:profile}));
+  }
+
   function removeFollow(email){setList(f=>f.filter(x=>x.email!==email));}
-  function openFollow(entry){const profile=liveData[entry.email];if(!profile||!profile.profile||!profile.profile.projects){setAddErr("No data yet for this person.");return;}setViewing({type:"dashboard",payload:{...profile.profile,by:profile.display_name||entry.by}});}
-  if(viewing){if(viewing.type==="dashboard")return <SharedDB payload={viewing.payload} onBack={()=>setViewing(null)}/>;return <SharedView projects={viewing.projects} by={viewing.by} onBack={()=>setViewing(null)}/>;}
+
+  function openFollow(entry){
+    const profile=liveData[entry.email];
+    if(!profile||!profile.profile||!profile.profile.projects){
+      setAddErr("No data yet for this person.");return;
+    }
+    setViewing({
+      type:"dashboard",
+      payload:{...profile.profile,by:profile.display_name||entry.by},
+    });
+  }
+
+  if(viewing){
+    if(viewing.type==="dashboard")return <SharedDB payload={viewing.payload} onBack={()=>setViewing(null)}/>;
+    return <SharedView projects={viewing.projects} by={viewing.by} onBack={()=>setViewing(null)}/>;
+  }
   return <div style={{minHeight:"100dvh",background:T.bg0,fontFamily:"inherit",display:"flex",flexDirection:"column"}}>
     <div style={{borderBottom:"1px solid "+T.border,padding:"calc(14px + env(safe-area-inset-top)) 15px 13px",display:"flex",alignItems:"center",gap:10,background:"#fff",position:"sticky",top:0,zIndex:50}}>
       <button onClick={onClose} style={{background:"none",border:"none",color:T.text2,cursor:"pointer",fontSize:20,width:36,height:36,display:"flex",alignItems:"center",justifyContent:"center",borderRadius:10}}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg></button>
@@ -614,44 +1003,112 @@ function Following({onClose}){
       <span style={{fontSize:13,color:T.text3,fontWeight:600}}>{list.length} following</span>
     </div>
     <div style={{flex:1,overflowY:"auto",padding:"12px 15px 40px",maxWidth:680,margin:"0 auto",width:"100%"}}>
+      {/* Add new follow */}
       <div style={{background:"#fff",borderRadius:18,padding:"18px",marginBottom:16,marginTop:6,boxShadow:T.shadow}}>
         <div style={{fontSize:12,color:T.text3,fontWeight:600,textTransform:"uppercase",letterSpacing:"0.07em",marginBottom:12}}>Follow someone</div>
-        <div style={{display:"flex",gap:8,alignItems:"flex-start"}}><input value={addEmail} onChange={e=>{setAddEmail(e.target.value);setAddErr("");}} placeholder="Their Tabletop Ready email..." style={{...IS,flex:1,fontSize:14}} onKeyDown={e=>e.key==="Enter"&&addFollow()}/><Btn sm onClick={addFollow} sx={{flexShrink:0,height:42}}>{refreshing?"...":"Follow"}</Btn></div>
+        <div style={{display:"flex",gap:8,alignItems:"flex-start"}}>
+          <input value={addEmail} onChange={e=>{setAddEmail(e.target.value);setAddErr("");}} placeholder="Their Tabletop Ready email..." style={{...IS,flex:1,fontSize:14}} onKeyDown={e=>e.key==="Enter"&&addFollow()}/>
+          <Btn sm onClick={addFollow} sx={{flexShrink:0,height:42}}>{refreshing?"...":"Follow"}</Btn>
+        </div>
         {addErr&&<div style={{fontSize:13,color:T.red,marginTop:8,lineHeight:1.5}}>{addErr}</div>}
-        <div style={{fontSize:12,color:T.text3,marginTop:10,lineHeight:1.6,padding:"10px 12px",background:T.bg2,borderRadius:10}}>Enter the email address your friend uses to sign in. Their hobby progress will update live automatically.</div>
+        <div style={{fontSize:12,color:T.text3,marginTop:10,lineHeight:1.6,padding:"10px 12px",background:T.bg2,borderRadius:10}}>
+          Enter the email address your friend uses to sign in. Their hobby progress will update live automatically.
+        </div>
       </div>
-      {list.length>0&&<div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}><div style={{fontSize:13,color:T.text2,fontWeight:600}}>{list.length} following</div><button onClick={()=>refreshAll(list)} style={{background:"none",border:"1px solid "+T.border,borderRadius:8,padding:"5px 12px",fontSize:12,color:T.text2,cursor:"pointer",fontFamily:"inherit"}}>{refreshing?"Refreshing...":"Refresh all"}</button></div>}
-      {list.length===0?<div style={{textAlign:"center",padding:"60px 20px",color:T.text3}}><div style={{fontSize:40,marginBottom:16}}>👥</div><div style={{fontSize:17,fontWeight:700,color:T.text,marginBottom:8}}>Not following anyone yet</div><div style={{fontSize:14,lineHeight:1.6}}>Enter a friend's email address above to follow their hobby progress in real time.</div></div>
-      :list.map((entry,i)=>{const live=liveData[entry.email];const name=(live&&live.display_name)||entry.by||entry.email.split("@")[0];const col=acolor(name);const profile=live&&live.profile;const pjs=profile&&profile.projects||[];const painted=pjs.reduce((a,p)=>a+(p.stats&&p.stats.painted||0),0);const total=pjs.reduce((a,p)=>a+(p.stats&&p.stats.total||0),0);const pct=total?Math.round(painted/total*100):0;const lastUpdate=live&&live.updated_at?new Date(live.updated_at).toLocaleString():null;const fakeStats={painted,built:pjs.reduce((a,p)=>a+(p.stats&&p.stats.built||0),0),unbuilt:pjs.reduce((a,p)=>a+(p.stats&&p.stats.unbuilt||0),0),new_in_box:pjs.reduce((a,p)=>a+(p.stats&&p.stats.new_in_box||0),0),total};
-        return <div key={i} onClick={()=>openFollow(entry)} style={{background:"#fff",borderRadius:18,padding:"16px 18px",marginBottom:10,cursor:"pointer",boxShadow:T.shadow}}>
-          <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:total?8:0}}><div style={{width:46,height:46,borderRadius:"50%",background:col+"18",border:"2px solid "+col+"30",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,fontWeight:800,color:col,flexShrink:0}}>{initials(name)}</div><div style={{flex:1,minWidth:0}}><div style={{fontSize:16,fontWeight:700,color:T.text,lineHeight:1.2}}>{name}</div><div style={{fontSize:12,color:T.text3,marginTop:2}}>{pjs.length} project{pjs.length!==1?"s":""}{total>0&&<span> · {painted}/{total} painted ({pct}%)</span>}</div>{lastUpdate&&<div style={{fontSize:11,color:T.text3,marginTop:1}}>Updated {lastUpdate}</div>}</div><div style={{display:"flex",gap:6,alignItems:"center",flexShrink:0}}><span style={{fontSize:12,color:T.accent,fontWeight:700}}>View →</span><button onClick={e=>{e.stopPropagation();removeFollow(entry.email);}} style={{background:"none",border:"1px solid "+T.border,borderRadius:8,padding:"4px 10px",fontSize:12,color:T.text3,cursor:"pointer",fontFamily:"inherit"}}>Remove</button></div></div>
-          {total>0&&<Bar stats={fakeStats}/>}
-          {!live&&<div style={{fontSize:12,color:T.text3,fontStyle:"italic",marginTop:4}}>Loading latest data...</div>}
-        </div>;})}
+
+      {list.length>0&&<div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+        <div style={{fontSize:13,color:T.text2,fontWeight:600}}>{list.length} following</div>
+        <button onClick={()=>refreshAll(list)} style={{background:"none",border:"1px solid "+T.border,borderRadius:8,padding:"5px 12px",fontSize:12,color:T.text2,cursor:"pointer",fontFamily:"inherit"}}>{refreshing?"Refreshing...":"Refresh all"}</button>
+      </div>}
+
+      {list.length===0
+        ?<div style={{textAlign:"center",padding:"60px 20px",color:T.text3}}>
+          <div style={{fontSize:40,marginBottom:16}}>👥</div>
+          <div style={{fontSize:17,fontWeight:700,color:T.text,marginBottom:8}}>Not following anyone yet</div>
+          <div style={{fontSize:14,lineHeight:1.6}}>Enter a friend's email address above to follow their hobby progress in real time.</div>
+        </div>
+        :list.map((entry,i)=>{
+          const live=liveData[entry.email];
+          const name=(live&&live.display_name)||entry.by||entry.email.split("@")[0];
+          const col=acolor(name);
+          const profile=live&&live.profile;
+          const pjs=profile&&profile.projects||[];
+          const painted=pjs.reduce((a,p)=>a+(p.stats&&p.stats.painted||0),0);
+          const total=pjs.reduce((a,p)=>a+(p.stats&&p.stats.total||0),0);
+          const pct=total?Math.round(painted/total*100):0;
+          const lastUpdate=live&&live.updated_at?new Date(live.updated_at).toLocaleString():null;
+          const fakeStats={painted,built:pjs.reduce((a,p)=>a+(p.stats&&p.stats.built||0),0),unbuilt:pjs.reduce((a,p)=>a+(p.stats&&p.stats.unbuilt||0),0),new_in_box:pjs.reduce((a,p)=>a+(p.stats&&p.stats.new_in_box||0),0),total};
+          return <div key={i} onClick={()=>openFollow(entry)} style={{background:"#fff",borderRadius:18,padding:"16px 18px",marginBottom:10,cursor:"pointer",boxShadow:T.shadow}}>
+            <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:total?8:0}}>
+              <div style={{width:46,height:46,borderRadius:"50%",background:col+"18",border:"2px solid "+col+"30",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,fontWeight:800,color:col,flexShrink:0}}>{initials(name)}</div>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:16,fontWeight:700,color:T.text,lineHeight:1.2}}>{name}</div>
+                <div style={{fontSize:12,color:T.text3,marginTop:2}}>
+                  {pjs.length} project{pjs.length!==1?"s":""}
+                  {total>0&&<span> · {painted}/{total} painted ({pct}%)</span>}
+                </div>
+                {lastUpdate&&<div style={{fontSize:11,color:T.text3,marginTop:1}}>Updated {lastUpdate}</div>}
+              </div>
+              <div style={{display:"flex",gap:6,alignItems:"center",flexShrink:0}}>
+                <span style={{fontSize:12,color:T.accent,fontWeight:700}}>View →</span>
+                <button onClick={e=>{e.stopPropagation();removeFollow(entry.email);}} style={{background:"none",border:"1px solid "+T.border,borderRadius:8,padding:"4px 10px",fontSize:12,color:T.text3,cursor:"pointer",fontFamily:"inherit"}}>Remove</button>
+              </div>
+            </div>
+            {total>0&&<Bar stats={fakeStats}/>}
+            {!live&&<div style={{fontSize:12,color:T.text3,fontStyle:"italic",marginTop:4}}>Loading latest data...</div>}
+          </div>;
+        })
+      }
     </div>
+    {/* Bottom nav */}
     <div style={{position:"fixed",bottom:0,left:0,right:0,background:"#fff",borderTop:"1px solid "+T.border,display:"flex",zIndex:100,paddingBottom:"env(safe-area-inset-bottom)"}}>
-      {[{id:"dashboard",icon:"📊",label:"Dashboard"},{id:"projects",icon:"⚔️",label:"Projects"},{id:"following",icon:"👥",label:"Following"},{id:"paints",icon:"🎨",label:"Paints"}].map(({id,icon,label})=><button key={id} onClick={()=>onClose(id)} style={{flex:1,padding:"10px 4px 9px",background:"none",border:"none",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:3,opacity:id==="following"?1:0.45}}><span style={{fontSize:18}}>{icon}</span><span style={{fontSize:9,fontWeight:700,letterSpacing:"0.06em",textTransform:"uppercase",color:id==="following"?T.accent:T.text3,fontFamily:"inherit"}}>{label}</span>{id==="following"&&<div style={{width:18,height:2,borderRadius:1,background:T.accent,marginTop:1}}/>}</button>)}
+      {[{id:"dashboard",icon:"📊",label:"Dashboard"},{id:"projects",icon:"⚔️",label:"Projects"},{id:"following",icon:"👥",label:"Following"},{id:"paints",icon:"🎨",label:"Paints"}].map(({id,icon,label})=><button key={id} onClick={()=>onClose(id)} style={{flex:1,padding:"10px 4px 9px",background:"none",border:"none",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:3,opacity:id==="following"?1:0.45}}>
+        <span style={{fontSize:18}}>{icon}</span>
+        <span style={{fontSize:9,fontWeight:700,letterSpacing:"0.06em",textTransform:"uppercase",color:id==="following"?T.accent:T.text3,fontFamily:"inherit"}}>{label}</span>
+        {id==="following"&&<div style={{width:18,height:2,borderRadius:1,background:T.accent,marginTop:1}}/>}
+      </button>)}
     </div>
   </div>;
 }
 
+
 function App(){
   const {sess,signIn,signOut}=useAuth();
   const [skipLogin,setSkipLogin]=useState(()=>lsGet(SK.skip,false));
-  const [data,setData]=useState(()=>{const fresh=lsGet(SK.data,null);if(fresh)return fresh;const old=lsGet("cq-data-v4",null)||lsGet("mr-data-v3",null)||lsGet("cq-data-v3",null);if(old)return old;return DEF_DATA;});
-  const {paints,setPaints,addP,delP,togP,paintsLoaded}=usePaints(sess);
+  const [data,setData]=useState(()=>{
+    const fresh=lsGet(SK.data,null);
+    if(fresh)return fresh;
+    // Migrate from older ColorQuest / Muster Roll storage keys
+    const old=lsGet("cq-data-v4",null)||lsGet("mr-data-v3",null)||lsGet("cq-data-v3",null);
+    if(old)return old;
+    return DEF_DATA;
+  });
+  const {paints,setPaints,addP,delP,togP}=usePaints();
   const {log,setLog,addE}=useLog();
-  const [syncSt,setSyncSt]=useState("idle");const [syncErr,setSyncErr]=useState(null);const [cloudLoaded,setCloudLoaded]=useState(false);
-  const [screen,setScreen]=useState("dashboard");const [pid,setPid]=useState(null);const [tab,setTab]=useState("units");
-  const [modal,setModal]=useState(null);const [recMod,setRecMod]=useState(null);const [paintMod,setPaintMod]=useState(null);
-  const [shareTgt,setShareTgt]=useState(null);const [splitTgt,setSplitTgt]=useState(null);const [editTgt,setEditTgt]=useState(null);
-  const [form,setForm]=useState({});const [filter,setFilter]=useState("all");const [search,setSearch]=useState("");
-  const [toast,setToast]=useState(null);const [showBkp,setShowBkp]=useState(false);
-  const swipeRef=useRef();const swipeStart=useRef(0);
+  const [syncSt,setSyncSt]=useState("idle");
+  const [syncErr,setSyncErr]=useState(null);
+  const [cloudLoaded,setCloudLoaded]=useState(false);
+  const [screen,setScreen]=useState("dashboard");
+  const [pid,setPid]=useState(null);
+  const [tab,setTab]=useState("units");
+  const [modal,setModal]=useState(null);
+  const [recMod,setRecMod]=useState(null);
+  const [paintMod,setPaintMod]=useState(null);
+  const [shareTgt,setShareTgt]=useState(null);
+  const [splitTgt,setSplitTgt]=useState(null);
+  const [editTgt,setEditTgt]=useState(null);
+  const [form,setForm]=useState({});
+  const [filter,setFilter]=useState("all");
+  const [search,setSearch]=useState("");
+  const [toast,setToast]=useState(null);
+  const [showBkp,setShowBkp]=useState(false);
+  const swipeRef=useRef();
+  const swipeStart=useRef(0);
 
   useEffect(()=>{lsSet(SK.data,data);},[data]);
   useEffect(()=>{const last=lsGet(SK.backup,null);if(last){const days=(Date.now()-new Date(last).getTime())/(1000*60*60*24);if(days>=7)setShowBkp(true);}},[]);
 
+  // ── Load from Supabase on sign-in ──────────────────────────────────────────
   useEffect(()=>{
     if(!sess||!sess.email||cloudLoaded)return;
     (async()=>{
@@ -659,24 +1116,33 @@ function App(){
       const cloud=await sbLoad(sess.email);
       if(cloud){
         if(cloud.projects&&cloud.projects.length)setData({projects:cloud.projects});
+        if(cloud.paints&&cloud.paints.length)setPaints(cloud.paints);
         if(cloud.log&&cloud.log.length)setLog(cloud.log);
       } else {
-        await sbSave(sess.email,{projects:data.projects,log});
+        // First time — push local data up
+        await sbSave(sess.email,{projects:data.projects,paints,log});
       }
-      setCloudLoaded(true);setSyncSt("synced");setSyncErr(null);
+      setCloudLoaded(true);
+      setSyncSt("synced");
+      setSyncErr(null);
     })();
   },[sess,cloudLoaded]);
 
+  // ── Save to Supabase on changes (debounced 1.5s) ─────────────────────────
   useEffect(()=>{
     if(!sess||!sess.email||!cloudLoaded)return;
     setSyncSt("syncing");
     const t=setTimeout(async()=>{
       const dn=lsGet(SK.dname,"");
-      const [ok]=await Promise.all([sbSave(sess.email,{projects:data.projects,log}),sbSaveProfile(sess.email,dn,data)]);
-      if(ok){setSyncSt("synced");setSyncErr(null);}else{setSyncSt("error");setSyncErr("Sync failed — check your connection.");}
+      const [ok]=await Promise.all([
+        sbSave(sess.email,{projects:data.projects,paints,log}),
+        sbSaveProfile(sess.email,dn,data),
+      ]);
+      if(ok){setSyncSt("synced");setSyncErr(null);}
+      else{setSyncSt("error");setSyncErr("Sync failed — check your connection.");}
     },1500);
     return()=>clearTimeout(t);
-  },[data,log,sess,cloudLoaded]);
+  },[data,paints,log,sess,cloudLoaded]);
 
   const toast2=(msg,color)=>{setToast({msg,color:color||T.green});setTimeout(()=>setToast(null),2600);};
   const close=()=>{setModal(null);setForm({});setEditTgt(null);};
@@ -686,26 +1152,31 @@ function App(){
   const addProject=()=>{if(!form.name||!form.name.trim())return;mut(ps=>[...ps,{id:nid(),name:form.name.trim(),faction:form.faction?form.faction.trim():"",units:[],recipes:[]}]);close();};
   const saveProject=()=>{mut(ps=>ps.map(p=>p.id===editTgt?{...p,name:form.name?form.name.trim():p.name,faction:form.faction!==undefined?form.faction.trim():p.faction}:p));close();};
   const delProject=id=>{mut(ps=>ps.filter(p=>p.id!==id));setScreen("projects");};
+
   const addUnit=()=>{if(!form.name||!form.name.trim())return;const u={id:nid(),name:form.name.trim(),models:parseInt(form.models)||1,status:form.status||"new_in_box",notes:form.notes||"",photos:form.photos||{before:null,wip:null,after:null},subgroups:null};mut(ps=>ps.map(p=>p.id===pid?{...p,units:[...p.units,u]}:p));close();};
   const saveUnit=()=>{mut(ps=>ps.map(p=>p.id===pid?{...p,units:p.units.map(u=>u.id===editTgt?{...u,name:form.name?form.name.trim():u.name,models:parseInt(form.models)||u.models,status:form.status||u.status,notes:form.notes!==undefined?form.notes:u.notes,photos:form.photos!==undefined?form.photos:safeP(u),subgroups:form.subgroups!==undefined?form.subgroups:u.subgroups}:u)}:p));close();};
   const delUnit=id=>mut(ps=>ps.map(p=>p.id===pid?{...p,units:p.units.filter(u=>u.id!==id)}:p));
   const chgStatus=(uid,newSt)=>{const proj=data.projects.find(p=>p.id===pid);const unit=proj&&proj.units.find(u=>u.id===uid);if(unit)addE(proj.name,unit.name,unit.models,unit.status,newSt);mut(ps=>ps.map(p=>p.id===pid?{...p,units:p.units.map(u=>u.id===uid?{...u,status:newSt}:u)}:p));toast2(unit?unit.name+" updated":"Updated");};
   const updSubgroups=(uid,sgs)=>{mut(ps=>ps.map(p=>p.id===pid?{...p,units:p.units.map(u=>u.id===uid?{...u,subgroups:sgs}:u)}:p));};
   const dupUnit=u=>{const copy={...u,id:nid(),name:u.name+" (copy)",status:"new_in_box",subgroups:null,photos:{before:null,wip:null,after:null}};mut(ps=>ps.map(p=>p.id===pid?{...p,units:[...p.units,copy]}:p));toast2("Duplicated: "+u.name);};
+
   const saveRecipe=recipe=>{if(recMod&&recMod.mode==="add"){const r={...recipe,id:nid()};mut(ps=>ps.map(p=>p.id===pid?{...p,recipes:[...(p.recipes||[]),r]}:p));}else{mut(ps=>ps.map(p=>p.id===pid?{...p,recipes:(p.recipes||[]).map(r=>r.id===recipe.id?recipe:r)}:p));}setRecMod(null);};
   const delRecipe=id=>mut(ps=>ps.map(p=>p.id===pid?{...p,recipes:(p.recipes||[]).filter(r=>r.id!==id)}:p));
+
   const handleImport=(projects,mode)=>{const rm=projects.map(p=>({...p,id:nid(),units:(p.units||[]).map(u=>({...u,id:nid()})),recipes:(p.recipes||[]).map(r=>({...r,id:nid()}))}));if(mode==="replace")setData({projects:rm});else mut(ps=>[...ps,...rm]);toast2("Imported "+projects.length+" project"+(projects.length!==1?"s":""));};
+
   function doBackup(){dlJSON({_tr:1,exported:new Date().toISOString(),projects:data.projects},"tabletop-ready-backup.mrp");lsSet(SK.backup,new Date().toISOString());setShowBkp(false);toast2("Backup saved");}
   function expProject(p){dlJSON({_tr:1,exported:new Date().toISOString(),project:p},p.name.replace(/[^a-z0-9]/gi,"_")+".mrp");}
 
   const project=data.projects.find(p=>p.id===pid);
   const filteredUnits=project?project.units.filter(u=>(filter==="all"||u.status===filter)&&(!search||u.name.toLowerCase().includes(search.toLowerCase())||(u.notes||"").toLowerCase().includes(search.toLowerCase()))):[];
   const shownProjects=data.projects.filter(p=>!search||p.name.toLowerCase().includes(search.toLowerCase())||(p.faction||"").toLowerCase().includes(search.toLowerCase())||p.units.some(u=>u.name.toLowerCase().includes(search.toLowerCase())));
+
   function goTo(id){setPid(id);setScreen("detail");setSearch("");setTab("units");}
 
   if(sess===undefined)return <div style={{minHeight:"100dvh",background:T.bg0,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"inherit"}}><div style={{color:T.accent,fontSize:13,fontWeight:700,letterSpacing:"0.15em"}}>LOADING...</div></div>;
   if(!sess&&!skipLogin)return <Login onSignIn={signIn} onSkip={()=>{lsSet(SK.skip,true);setSkipLogin(true);}}/>;
-  if(screen==="paints")return <PaintLibrary paints={paints} addP={addP} delP={delP} togP={togP} paintsLoaded={paintsLoaded} onClose={id=>setScreen(id&&typeof id==="string"?id:"projects")}/>;
+  if(screen==="paints")return <PaintLibrary paints={paints} addP={addP} delP={delP} togP={togP} onClose={id=>setScreen(id&&typeof id==="string"?id:"projects")}/>;
   if(screen==="shopping")return <ShoppingList data={data} paints={paints} onClose={()=>setScreen("projects")}/>;
   if(screen==="following")return <Following onClose={id=>setScreen(id&&typeof id==="string"?id:"dashboard")}/>;
   if(screen==="account")return <Account sess={sess} status={syncSt} err={syncErr} onOut={()=>{signOut();setSkipLogin(false);lsSet(SK.skip,false);setScreen("dashboard");}} onClose={()=>setScreen("dashboard")}/>;
@@ -720,10 +1191,27 @@ function App(){
   return <div style={{minHeight:"100dvh",background:T.bg0,color:T.text,fontFamily:"inherit",display:"flex",flexDirection:"column"}}>
     {toast&&<div style={{position:"fixed",top:"calc(16px + env(safe-area-inset-top))",left:"50%",transform:"translateX(-50%)",background:"#fff",border:"1px solid "+toast.color+"50",borderRadius:12,padding:"10px 18px",fontSize:13,fontWeight:700,color:toast.color,zIndex:999,boxShadow:"0 8px 32px rgba(0,0,0,0.12)",whiteSpace:"nowrap",pointerEvents:"none"}}>{toast.msg}</div>}
     {!sess&&skipLogin&&<SessionBanner onSignIn={()=>{lsSet(SK.skip,false);setSkipLogin(false);}}/>}
+
     <div style={{position:"sticky",top:0,zIndex:50,background:"rgba(255,255,255,0.95)",backdropFilter:"blur(12px)",WebkitBackdropFilter:"blur(12px)",borderBottom:"1px solid "+T.border,flexShrink:0}}>
       <div style={{padding:"calc(env(safe-area-inset-top) + 10px) 16px 10px",display:"flex",alignItems:"center",gap:8,minHeight:50}}>
-        {screen==="detail"?<button onClick={()=>{setScreen("projects");setPid(null);setFilter("all");setSearch("");}} style={{background:"none",border:"none",color:T.text2,cursor:"pointer",width:34,height:34,display:"flex",alignItems:"center",justifyContent:"center",borderRadius:10,flexShrink:0,marginRight:2}}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg></button>:<div style={{width:34,flexShrink:0}}/>}
-        <div style={{flex:1,minWidth:0}}>{screen==="detail"&&project?<div style={{fontWeight:700,fontSize:17,color:T.text,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",lineHeight:1.2}}>{project.name}{project.faction&&<span style={{fontWeight:400,color:T.text3,fontSize:14}}> · {project.faction}</span>}</div>:<div style={{fontWeight:800,fontSize:16,color:T.text,letterSpacing:"-0.01em"}}>Tabletop Ready</div>}</div>
+        {/* Left: back arrow in detail */}
+        {screen==="detail"
+          ? <button onClick={()=>{setScreen("projects");setPid(null);setFilter("all");setSearch("");}} style={{background:"none",border:"none",color:T.text2,cursor:"pointer",width:34,height:34,display:"flex",alignItems:"center",justifyContent:"center",borderRadius:10,flexShrink:0,marginRight:2}}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+            </button>
+          : <div style={{width:34,flexShrink:0}}/>
+        }
+        {/* Centre: title */}
+        <div style={{flex:1,minWidth:0}}>
+          {screen==="detail"&&project
+            ? <div style={{fontWeight:700,fontSize:17,color:T.text,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",lineHeight:1.2}}>
+                {project.name}
+                {project.faction&&<span style={{fontWeight:400,color:T.text3,fontSize:14}}> · {project.faction}</span>}
+              </div>
+            : <div style={{fontWeight:800,fontSize:16,color:T.text,letterSpacing:"-0.01em"}}>Tabletop Ready</div>
+          }
+        </div>
+        {/* Right: account + menu */}
         <div style={{display:"flex",alignItems:"center",gap:4,flexShrink:0}}>
           <button onClick={()=>setScreen("account")} style={{background:"none",border:"none",cursor:"pointer",width:34,height:34,display:"flex",alignItems:"center",justifyContent:"center",position:"relative",borderRadius:10}}>
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={T.text2} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
@@ -732,23 +1220,45 @@ function App(){
           <SettingsMenu items={menuItems} primary={primary}/>
         </div>
       </div>
-      {(screen==="projects"||screen==="detail")&&<div style={{padding:"0 14px 10px"}}><div style={{position:"relative"}}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={T.text3} strokeWidth="2.5" strokeLinecap="round" style={{position:"absolute",left:12,top:"50%",transform:"translateY(-50%)"}}><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg><input value={search} onChange={e=>setSearch(e.target.value)} placeholder={screen==="projects"?"Search projects...":"Search units or notes..."} style={{...IS,paddingLeft:34,paddingTop:"9px",paddingBottom:"9px",background:T.bg2,fontSize:14}}/>{search&&<button onClick={()=>setSearch("")} style={{position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",background:T.border,border:"none",borderRadius:"50%",width:20,height:20,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",color:T.text3,fontSize:12}}>x</button>}</div></div>}
+      {/* Search bar */}
+      {(screen==="projects"||screen==="detail")&&<div style={{padding:"0 14px 10px"}}>
+        <div style={{position:"relative"}}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={T.text3} strokeWidth="2.5" strokeLinecap="round" style={{position:"absolute",left:12,top:"50%",transform:"translateY(-50%)"}}><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <input value={search} onChange={e=>setSearch(e.target.value)} placeholder={screen==="projects"?"Search projects...":"Search units or notes..."} style={{...IS,paddingLeft:34,paddingTop:"9px",paddingBottom:"9px",background:T.bg2,fontSize:14}}/>
+          {search&&<button onClick={()=>setSearch("")} style={{position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",background:T.border,border:"none",borderRadius:"50%",width:20,height:20,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",color:T.text3,fontSize:12}}>x</button>}
+        </div>
+      </div>}
     </div>
 
     {showBkp&&screen!=="detail"&&<BackupBanner onExport={doBackup} onDismiss={()=>setShowBkp(false)}/>}
 
-    <div style={{flex:1,overflowY:"auto"}} ref={swipeRef}
+    <div style={{flex:1,overflowY:"auto"}}
+      ref={swipeRef}
       onTouchStart={e=>{swipeStart.current=e.touches[0].clientX;}}
-      onTouchEnd={e=>{const dx=e.changedTouches[0].clientX-swipeStart.current;if(Math.abs(dx)<60)return;const tabs=["dashboard","projects","following","paints"];const cur=tabs.indexOf(screen==="detail"?"projects":screen);if(cur<0)return;if(dx<0&&cur<tabs.length-1)setScreen(tabs[cur+1]);if(dx>0&&cur>0)setScreen(tabs[cur-1]);}}>
-
+      onTouchEnd={e=>{
+        const dx=e.changedTouches[0].clientX-swipeStart.current;
+        if(Math.abs(dx)<60)return;
+        const tabs=["dashboard","projects","following","paints"];
+        const cur=tabs.indexOf(screen===" detail"?"projects":screen);
+        if(cur<0)return;
+        if(dx<0&&cur<tabs.length-1)setScreen(tabs[cur+1]);
+        if(dx>0&&cur>0)setScreen(tabs[cur-1]);
+      }}
+    >
       {screen==="dashboard"&&<Dashboard data={data} log={log} onGoTo={goTo}/>}
 
       {screen==="projects"&&<div style={{padding:"14px 16px",maxWidth:680,margin:"0 auto",paddingBottom:"calc(88px + env(safe-area-inset-bottom))"}}>
         {(()=>{const g={new_in_box:0,unbuilt:0,built:0,painted:0,total:0};data.projects.forEach(p=>{const s=getStats(p);Object.keys(g).forEach(k=>g[k]+=(s[k]||0));});const pct=g.total?Math.round(g.painted/g.total*100):0;return <div style={{background:"linear-gradient(135deg,#5b6af008,#fff 70%)",borderRadius:18,padding:"16px 18px",marginBottom:14,marginTop:6,boxShadow:T.shadow}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}><div><div style={{fontSize:16,fontWeight:900,color:T.text}}>{g.total} <span style={{fontSize:13,fontWeight:500,color:T.text3}}>models</span></div><div style={{fontSize:12,color:T.text3,marginTop:2}}>{data.projects.length} project{data.projects.length!==1?"s":""}</div></div><div style={{textAlign:"right"}}><div style={{fontSize:22,fontWeight:900,color:T.green}}>{pct}%</div><div style={{fontSize:11,color:T.text3}}>painted</div></div></div><Bar stats={g}/><div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:6}}>{Object.entries(SC).map(([k,sc])=>g[k]>0&&<span key={k} style={{fontSize:12,background:sc.bg,color:sc.color,borderRadius:20,padding:"3px 10px",fontWeight:700}}>{ICONS[k]} {g[k]}</span>)}</div></div>;})()}
-        {shownProjects.length===0&&<div style={{textAlign:"center",padding:"60px 20px"}}>{search?<><div style={{fontSize:32,marginBottom:12}}>🔍</div><div style={{fontSize:15,fontWeight:600,color:T.text,marginBottom:6}}>No projects match</div><div style={{fontSize:13,color:T.text3}}>Try a different search term</div></>:<><div style={{fontSize:48,marginBottom:16}}>🎨</div><div style={{fontSize:18,fontWeight:700,color:T.text,marginBottom:8}}>Welcome to Tabletop Ready</div><div style={{fontSize:14,color:T.text3,lineHeight:1.6,marginBottom:20}}>Start tracking your hobby progress by adding your first project</div><Btn onClick={()=>{setModal("addProject");setForm({});}}>+ Create First Project</Btn></>}</div>}
+        {shownProjects.length===0&&<div style={{textAlign:"center",padding:"60px 20px"}}>
+      {search
+        ?<><div style={{fontSize:32,marginBottom:12}}>🔍</div><div style={{fontSize:15,fontWeight:600,color:T.text,marginBottom:6}}>No projects match</div><div style={{fontSize:13,color:T.text3}}>Try a different search term</div></>
+        :<><div style={{fontSize:48,marginBottom:16}}>🎨</div><div style={{fontSize:18,fontWeight:700,color:T.text,marginBottom:8}}>Welcome to Tabletop Ready</div><div style={{fontSize:14,color:T.text3,lineHeight:1.6,marginBottom:20}}>Start tracking your hobby progress by adding your first project</div><Btn onClick={()=>{setModal("addProject");setForm({});}}>+ Create First Project</Btn></>
+      }
+    </div>}
         {shownProjects.map(p=>{const s=getStats(p);const complete=s.total>0&&s.painted===s.total;return <div key={p.id} onClick={()=>goTo(p.id)} style={{background:"#fff",borderRadius:18,padding:"16px 18px",marginBottom:10,cursor:"pointer",boxShadow:T.shadow}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}><div style={{flex:1,minWidth:0}}><div style={{display:"flex",alignItems:"center",gap:8}}><div style={{fontWeight:700,fontSize:16,color:T.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",letterSpacing:"-0.01em"}}>{p.name}</div>{complete&&<span style={{fontSize:11,background:T.green+"18",color:T.green,border:"1px solid "+T.green+"30",borderRadius:20,padding:"2px 8px",fontWeight:700,flexShrink:0}}>Complete</span>}</div>{p.faction&&<div style={{fontSize:13,color:T.text3,marginTop:2}}>{p.faction}</div>}</div><div style={{textAlign:"right",flexShrink:0,marginLeft:10}}><div style={{fontWeight:700,color:T.accent,fontSize:22,lineHeight:1}}>{s.total}</div><div style={{fontSize:12,color:T.text3}}>models</div></div></div>
-          <Bar stats={s}/><div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:5}}>{Object.entries(SC).map(([k,c])=>s[k]>0&&<span key={k} style={{fontSize:12,color:c.color}}>{ICONS[k]} {s[k]} {c.label}</span>)}</div>
+          <Bar stats={s}/>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:5}}>{Object.entries(SC).map(([k,c])=>s[k]>0&&<span key={k} style={{fontSize:12,color:c.color}}>{ICONS[k]} {s[k]} {c.label}</span>)}</div>
           <div style={{marginTop:6,fontSize:12,color:T.text3}}>{p.units.length} units, {(p.recipes||[]).length} recipes</div>
         </div>;})}
       </div>}
@@ -758,9 +1268,19 @@ function App(){
         <TabBar tabs={[{id:"units",label:"Units ("+project.units.length+")"},{id:"recipes",label:"Recipes ("+(project.recipes||[]).length+")"},{id:"showcase",label:"Showcase"}]} active={tab} onChange={setTab}/>
         {tab==="units"&&<>
           <div style={{display:"flex",gap:6,marginBottom:12,overflowX:"auto",paddingBottom:2}}>
-            {[["all","All",null],...Object.entries(SC).map(([k,v])=>[k,ICONS[k],v.color])].map(([k,icon,color])=>{const active=filter===k;return <button key={k} onClick={()=>setFilter(k)} style={{flexShrink:0,display:"flex",alignItems:"center",gap:5,background:active?(color?color+"18":T.accentDim):"transparent",border:"1px solid "+(active?(color||T.accent)+"40":T.border),borderRadius:20,padding:"6px 12px",cursor:"pointer",color:active?(color||T.accent):T.text3,fontSize:12,fontWeight:active?700:500,fontFamily:"inherit",whiteSpace:"nowrap"}}>{icon&&<span style={{fontSize:14}}>{icon}</span>}<span>{k==="all"?"All":SC[k].label}</span></button>;})}
+            {[["all","All",null],...Object.entries(SC).map(([k,v])=>[k,ICONS[k],v.color])].map(([k,icon,color])=>{
+              const active=filter===k;
+              return <button key={k} onClick={()=>setFilter(k)} style={{flexShrink:0,display:"flex",alignItems:"center",gap:5,background:active?(color?color+"18":T.accentDim):"transparent",border:"1px solid "+(active?(color||T.accent)+"40":T.border),borderRadius:20,padding:"6px 12px",cursor:"pointer",color:active?(color||T.accent):T.text3,fontSize:12,fontWeight:active?700:500,fontFamily:"inherit",whiteSpace:"nowrap"}}>
+                {icon&&<span style={{fontSize:14}}>{icon}</span>}<span>{k==="all"?"All":SC[k].label}</span>
+              </button>;
+            })}
           </div>
-          {filteredUnits.length===0&&<div style={{textAlign:"center",padding:"48px 20px"}}>{project.units.length===0?<><div style={{fontSize:40,marginBottom:12}}>⚔️</div><div style={{fontSize:16,fontWeight:600,color:T.text,marginBottom:8}}>No units yet</div><div style={{fontSize:13,color:T.text3,lineHeight:1.6,marginBottom:18}}>Add your first unit to start tracking this project</div><Btn onClick={()=>{setModal("addUnit");setForm({status:"new_in_box",models:"1"});}}>+ Add First Unit</Btn></>:<><div style={{fontSize:32,marginBottom:12}}>🔍</div><div style={{fontSize:15,fontWeight:600,color:T.text,marginBottom:6}}>No units match</div><div style={{fontSize:13,color:T.text3}}>Try a different filter</div></>}</div>}
+          {filteredUnits.length===0&&<div style={{textAlign:"center",padding:"48px 20px"}}>
+      {project.units.length===0
+        ?<><div style={{fontSize:40,marginBottom:12}}>⚔️</div><div style={{fontSize:16,fontWeight:600,color:T.text,marginBottom:8}}>No units yet</div><div style={{fontSize:13,color:T.text3,lineHeight:1.6,marginBottom:18}}>Add your first unit to start tracking this project</div><Btn onClick={()=>{setModal("addUnit");setForm({status:"new_in_box",models:"1"});}}>+ Add First Unit</Btn></>
+        :<><div style={{fontSize:32,marginBottom:12}}>🔍</div><div style={{fontSize:15,fontWeight:600,color:T.text,marginBottom:6}}>No units match</div><div style={{fontSize:13,color:T.text3}}>Try a different filter</div></>
+      }
+    </div>}
           {filteredUnits.map(u=><UnitCard key={u.id} unit={u} onEdit={u=>{setEditTgt(u.id);setForm({name:u.name,models:String(u.models),status:u.status,notes:u.notes||"",photos:safeP(u),subgroups:u.subgroups});setModal("editUnit");}} onDelete={delUnit} onStatus={chgStatus} onSplit={u=>setSplitTgt(u)} onDupe={dupUnit} onUpdateSubgroups={updSubgroups}/>)}
         </>}
         {tab==="recipes"&&<>{(project.recipes||[]).length===0&&<div style={{textAlign:"center",color:T.text3,padding:"40px 0",fontSize:14}}>No recipes yet. Tap + Recipe to add one.</div>}{(project.recipes||[]).map(r=><RecipeCard key={r.id} recipe={r} onEdit={r=>setRecMod({recipe:r,mode:"edit"})} onDelete={delRecipe} onPaint={r=>setPaintMod(r)}/>)}</>}
@@ -771,7 +1291,16 @@ function App(){
 
     <div style={{position:"fixed",bottom:0,left:0,right:0,background:"rgba(255,255,255,0.95)",backdropFilter:"blur(16px)",WebkitBackdropFilter:"blur(16px)",borderTop:"1px solid "+T.border,zIndex:100,paddingBottom:"env(safe-area-inset-bottom)"}}>
       <div style={{display:"flex",padding:"6px 8px"}}>
-        {[{id:"dashboard",icon:"📊",label:"Home"},{id:"projects",icon:"⚔️",label:"Projects"},{id:"following",icon:"👥",label:"Following"},{id:"paints",icon:"🎨",label:"Paints"}].map(({id,icon,label})=>{const active=screen===id||(screen==="detail"&&id==="projects");return <button key={id} onClick={()=>{if(id==="projects"&&screen==="detail"){setScreen("projects");setPid(null);setFilter("all");setSearch("");}else setScreen(id);}} style={{flex:1,padding:"8px 4px 6px",background:"none",border:"none",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:2,WebkitTapHighlightColor:"transparent"}}><div style={{width:44,height:30,borderRadius:20,background:active?T.accentDim:"transparent",display:"flex",alignItems:"center",justifyContent:"center",transition:"background 0.15s"}}><span style={{fontSize:20}}>{icon}</span></div><span style={{fontSize:10,fontWeight:active?700:400,color:active?T.accent:T.text3,fontFamily:"inherit",letterSpacing:"0.01em"}}>{label}</span></button>;})}
+        {[{id:"dashboard",icon:"📊",label:"Home"},{id:"projects",icon:"⚔️",label:"Projects"},{id:"following",icon:"👥",label:"Following"},{id:"paints",icon:"🎨",label:"Paints"}].map(({id,icon,label})=>{
+          const active=screen===id||(screen==="detail"&&id==="projects");
+          return <button key={id} onClick={()=>{if(id==="projects"&&screen==="detail"){setScreen("projects");setPid(null);setFilter("all");setSearch("");}else setScreen(id);}}
+            style={{flex:1,padding:"8px 4px 6px",background:"none",border:"none",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:2,WebkitTapHighlightColor:"transparent"}}>
+            <div style={{width:44,height:30,borderRadius:20,background:active?T.accentDim:"transparent",display:"flex",alignItems:"center",justifyContent:"center",transition:"background 0.15s"}}>
+              <span style={{fontSize:20}}>{icon}</span>
+            </div>
+            <span style={{fontSize:10,fontWeight:active?700:400,color:active?T.accent:T.text3,fontFamily:"inherit",letterSpacing:"0.01em"}}>{label}</span>
+          </button>;
+        })}
       </div>
     </div>
 
@@ -784,10 +1313,15 @@ function App(){
     {modal==="editProject"&&<Modal title="Edit Project" onClose={close}><Inp label="Project Name" value={form.name||""} onChange={e=>sf("name",e.target.value)} autoFocus/><Inp label="Faction / Army" value={form.faction||""} onChange={e=>sf("faction",e.target.value)}/><div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:4}}><Btn v="sec" sm onClick={close}>Cancel</Btn><Btn sm onClick={saveProject}>Save</Btn></div></Modal>}
     {(modal==="addUnit"||modal==="editUnit")&&<Modal title={modal==="addUnit"?"Add Unit":"Edit Unit"} onClose={close} wide>
       <Inp label="Unit Name" placeholder="e.g. Tactical Squad..." value={form.name||""} onChange={e=>sf("name",e.target.value)} autoFocus/>
-      <Field label="Number of Models" mb={13}><input type="number" min="1" value={form.models!==undefined?form.models:""} onChange={e=>sf("models",e.target.value)} onBlur={e=>{if(!e.target.value||parseInt(e.target.value)<1)sf("models","1");}} style={{...IS,fontSize:16}}/></Field>
+      <Field label="Number of Models" mb={13}>
+      <input type="number" min="1" value={form.models!==undefined?form.models:""} 
+        onChange={e=>sf("models",e.target.value)}
+        onBlur={e=>{if(!e.target.value||parseInt(e.target.value)<1)sf("models","1");}}
+        style={{...IS,fontSize:16}}/>
+    </Field>
       <Sel label="Status" value={form.status||"new_in_box"} onChange={e=>sf("status",e.target.value)}>{Object.entries(SC).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}</Sel>
       <Txt label="Notes" placeholder="Assembly notes, colour cues..." value={form.notes||""} onChange={e=>sf("notes",e.target.value)}/>
-      <MultiPhoto photos={form.photos||{before:null,wip:null,after:null}} onChange={v=>sf("photos",v)}/>
+      <MultiPhoto photos={form.photos||{before:null,wip:null,after:null}} onChange={v=>sf("photos",v)} sess={sess} projectId={pid} unitId={editTgt||"new"}/>
       <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:6}}><Btn v="sec" sm onClick={close}>Cancel</Btn><Btn sm onClick={modal==="addUnit"?addUnit:saveUnit}>{modal==="addUnit"?"Add Unit":"Save"}</Btn></div>
     </Modal>}
     {recMod&&<RecipeModal recipe={recMod.recipe} onSave={saveRecipe} onClose={()=>setRecMod(null)} paints={paints} addP={addP}/>}
