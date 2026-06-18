@@ -285,60 +285,52 @@ const toB64=f=>new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res
 const toTxt=f=>new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result);r.onerror=rej;r.readAsText(f);});
 async function parseImp(file){try{const raw=JSON.parse(await toTxt(file));const ps=raw.projects?raw.projects:raw.project?[raw.project]:null;if(!ps||!ps.length)return{ok:false,error:"No projects found in this file."};return{ok:true,projects:ps};}catch(e){return{ok:false,error:"Could not read file - make sure it is a .mrp backup."};}}
 
+function jwtEmail(t){try{const p=t.split(".")[1];const j=JSON.parse(atob(p.replace(/-/g,"+").replace(/_/g,"/")));return j.email||null;}catch(e){return null;}}
+
 function useAuth(){
   const [sess,setSess]=useState(undefined);
-  const tcRef=useRef(null);
 
-  // Restore session from localStorage on mount
   useEffect(()=>{
+    const hash=window.location.hash;
+    if(hash&&hash.includes("access_token")){
+      const params=new URLSearchParams(hash.replace("#","?"));
+      const accessToken=params.get("access_token");
+      const expiresIn=parseInt(params.get("expires_in")||"3600");
+      if(accessToken){
+        const email=jwtEmail(accessToken);
+        if(email){
+          _sbJwt=accessToken;
+          const exp=Date.now()+expiresIn*1000-60000;
+          lsSet(TKEY,{token:accessToken,email,expiresAt:exp,sbJwt:accessToken});
+          setSess({token:accessToken,email});
+          sbSetEmail(email);
+          window.history.replaceState(null,"",window.location.pathname+window.location.search);
+          return;
+        }
+      }
+    }
     const s=lsGet(TKEY,null);
-    if(s&&s.expiresAt>Date.now()){setSess({token:s.token,email:s.email});}
-    else{lsSet(TKEY,null);setSess(null);}
+    if(s&&s.expiresAt>Date.now()){
+      if(s.sbJwt){_sbJwt=s.sbJwt;}
+      setSess({token:s.token,email:s.email});
+    } else{lsSet(TKEY,null);setSess(null);}
   },[]);
 
-  // Token expiry check every 30s
   useEffect(()=>{
     const t=setInterval(()=>{
       const s=lsGet(TKEY,null);
-      if(s&&s.expiresAt&&s.expiresAt<Date.now()){lsSet(TKEY,null);setSess(null);}
+      if(s&&s.expiresAt&&s.expiresAt<Date.now()){lsSet(TKEY,null);_sbJwt=null;setSess(null);}
     },30000);
     return()=>clearInterval(t);
   },[]);
 
-  // Init Google OAuth token client (sign-in only, no Drive scope needed)
-  useEffect(()=>{
-    let tries=0;
-    const init=()=>{
-      if(window.google&&window.google.accounts&&window.google.accounts.oauth2){
-        tcRef.current=window.google.accounts.oauth2.initTokenClient({
-          client_id:GID,
-          scope:GSCOPE,
-          callback:async resp=>{
-            if(resp.error)return;
-            const tok=resp.access_token;
-            const exp=Date.now()+(resp.expires_in||3600)*1000-60000;
-            const email=await gEmail(tok);
-            if(!email)return;
-            // Try to get a Supabase JWT (best case — enables RLS)
-            await sbSignIn(tok);
-            lsSet(TKEY,{token:tok,email,expiresAt:exp});
-            setSess({token:tok,email});sbSetEmail(email);
-          }
-        });
-      } else if(tries<50){tries++;setTimeout(init,100);}
-    };
-    init();
+  const signIn=useCallback(()=>{
+    const redirectTo=encodeURIComponent(window.location.origin+"/");
+    window.location.href=SB_URL+"/auth/v1/authorize?provider=google&redirect_to="+redirectTo;
   },[]);
 
-  const signIn=useCallback(()=>{if(tcRef.current)tcRef.current.requestAccessToken({prompt:"consent"});},[]);
   const signOut=useCallback(()=>{
-    const s=lsGet(TKEY,null);
-    if(s&&s.token&&window.google&&window.google.accounts&&window.google.accounts.oauth2){
-      window.google.accounts.oauth2.revoke(s.token,()=>{});
-    }
-    lsSet(TKEY,null);
-    _sbJwt=null;
-    setSess(null);
+    lsSet(TKEY,null);_sbJwt=null;setSess(null);
   },[]);
 
   return{sess,signIn,signOut};
