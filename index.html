@@ -969,6 +969,18 @@ function SharedView({projects,by,onBack,onAdd}){
   </div>;
 }
 
+class ProfileViewerBoundary extends React.Component{
+  constructor(p){super(p);this.state={err:null};}
+  static getDerivedStateFromError(e){return{err:e.message||String(e)};}
+  render(){
+    if(this.state.err)return <div style={{padding:20,color:"#dc2626",fontSize:13,background:"#fff",minHeight:"100dvh"}}>
+      <button onClick={this.props.onBack} style={{background:"none",border:"none",color:"#4a5568",cursor:"pointer",fontSize:14,marginBottom:16,display:"block"}}>← Back</button>
+      <strong>Error loading profile:</strong><br/>{this.state.err}
+    </div>;
+    return this.props.children;
+  }
+}
+
 function ProfileViewer({viewing,followingList,followerList,onBack,onFollowBack,busy}){
   const {email,name,loading:vloading,projects}=viewing;
   const pjs=projects||[];
@@ -1159,7 +1171,7 @@ function Following({onClose,sess}){
 
   // ── Profile viewer ──────────────────────────────────────────────────────────
   if(viewing){
-    return <ProfileViewer viewing={viewing} followingList={followingList} followerList={followerList} onBack={()=>setViewing(null)} onFollowBack={followBack} busy={busy}/>;
+    return <ProfileViewerBoundary onBack={()=>setViewing(null)}><ProfileViewer viewing={viewing} followingList={followingList} followerList={followerList} onBack={()=>setViewing(null)} onFollowBack={followBack} busy={busy}/></ProfileViewerBoundary>;
   }
 
 
