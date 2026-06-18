@@ -969,6 +969,98 @@ function SharedView({projects,by,onBack,onAdd}){
   </div>;
 }
 
+function ProfileViewer({viewing,followingList,followerList,onBack,onFollowBack,busy}){
+  const {email,name,loading:vloading,projects}=viewing;
+  const pjs=projects||[];
+  const isFollowing=followingList.includes(email);
+  const isFollower=followerList.includes(email);
+  const col=(()=>{const cols=[T.accent,T.blue,T.green,T.orange,T.yellow];return name?cols[name.charCodeAt(0)%cols.length]:T.text3;})();
+  const initials=name?name.trim().split(" ").map(w=>w[0]).join("").toUpperCase().slice(0,2):"?";
+  const [vtab,setVtab]=useState("projects");
+  const [vpidx,setVpidx]=useState(null);
+  const paintNeeded=useMemo(()=>{
+    const map={};
+    pjs.forEach(p=>(p.recipes||[]).forEach(r=>(r.steps||[]).forEach(s=>{
+      if(!s.paint)return;
+      const key=(s.brand||"")+s.paint;
+      if(!map[key])map[key]={name:s.paint,brand:s.brand||"",type:s.type||"",projects:new Set()};
+      map[key].projects.add(p.name);
+    })));
+    return Object.values(map).map(e=>({...e,projects:[...e.projects]})).sort((a,b)=>(a.brand+a.name).localeCompare(b.brand+b.name));
+  },[projects]);
+  const g={new_in_box:0,unbuilt:0,built:0,painted:0,total:0};
+  pjs.forEach(p=>{const s=getStats(p);Object.keys(g).forEach(k=>g[k]+=(s[k]||0));});
+  const pct=g.total?Math.round(g.painted/g.total*100):0;
+
+  if(vpidx!==null){
+    const p=pjs[vpidx];
+    const s=getStats(p);
+    const shots=p.units.flatMap(u=>{const ph=safeP(u);return[{img:ph.after,lbl:"After",u},{img:ph.wip,lbl:"WIP",u},{img:ph.before,lbl:"Before",u}].filter(x=>x.img);});
+    return <div style={{minHeight:"100dvh",background:T.bg0,fontFamily:"inherit",color:T.text}}>
+      <div style={{borderBottom:"1px solid "+T.border,padding:"calc(14px + env(safe-area-inset-top)) 15px 13px",display:"flex",alignItems:"center",gap:10,background:T.bg1,position:"sticky",top:0,zIndex:50}}>
+        <button onClick={()=>setVpidx(null)} style={{background:"none",border:"none",color:T.text2,cursor:"pointer",width:36,height:36,display:"flex",alignItems:"center",justifyContent:"center",borderRadius:10}}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg></button>
+        <div style={{flex:1,minWidth:0}}><div style={{fontSize:11,color:T.text3,fontWeight:700,textTransform:"uppercase",letterSpacing:"0.05em"}}>{name}</div><div style={{fontWeight:700,fontSize:16,color:T.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{p.name}{p.faction&&<span style={{fontWeight:400,color:T.text3,fontSize:13}}> · {p.faction}</span>}</div></div>
+      </div>
+      <div style={{padding:"12px 15px 40px",maxWidth:680,margin:"0 auto"}}>
+        <div style={{background:"#fff",borderRadius:14,padding:"14px",marginBottom:12,boxShadow:T.shadow}}><Bar stats={s}/><div style={{display:"flex",gap:10,flexWrap:"wrap",marginTop:6}}>{Object.entries(SC).map(([k,c])=><div key={k} style={{fontSize:12}}><span style={{color:T.text3}}>{c.label}: </span><span style={{color:c.color,fontWeight:700}}>{s[k]||0}</span></div>)}</div></div>
+        <TabBar tabs={[{id:"units",label:"Units ("+p.units.length+")"},{id:"recipes",label:"Recipes ("+(p.recipes||[]).length+")"},{id:"showcase",label:"Showcase"}]} active={vtab} onChange={t=>setVtab(t)}/>
+        {vtab==="units"&&p.units.map(u=>{const ph=safeP(u);const sh2=[{k:"before",l:"Before",v:ph.before},{k:"wip",l:"WIP",v:ph.wip},{k:"after",l:"After",v:ph.after}].filter(x=>x.v);return <div key={u.id} style={{background:"#fff",borderRadius:16,padding:"14px 16px",marginBottom:10,boxShadow:T.shadow}}>
+          {sh2.length>0&&<div style={{display:"flex",gap:6,marginBottom:10}}>{sh2.map(x=><div key={x.k} style={{position:"relative",flexShrink:0}}><img src={x.v} alt={x.l} style={{width:72,height:72,objectFit:"cover",borderRadius:10,display:"block"}}/><div style={{position:"absolute",bottom:2,left:2,background:"rgba(0,0,0,0.6)",borderRadius:4,padding:"2px 5px",fontSize:9,color:"#fff",fontWeight:700}}>{x.l}</div></div>)}</div>}
+          <div style={{fontWeight:700,fontSize:15,color:T.text,marginBottom:6}}>{u.name}</div>
+          <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}><Badge status={u.status}/><span style={{fontSize:13,color:T.text2}}>{u.models} model{u.models!==1?"s":""}</span></div>
+          {u.notes&&<div style={{marginTop:8,fontSize:12,color:T.text2,lineHeight:1.55,borderLeft:"2px solid "+T.border,paddingLeft:8,whiteSpace:"pre-wrap"}}>{u.notes}</div>}
+        </div>;})}
+        {vtab==="recipes"&&(p.recipes||[]).map(r=><RecipeCard key={r.id} recipe={r} readOnly onEdit={()=>{}} onDelete={()=>{}} onPaint={()=>{}}/>)}
+        {vtab==="showcase"&&<div><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>{shots.map(({img,lbl,u},i)=><div key={i} style={{borderRadius:14,overflow:"hidden",position:"relative"}}><img src={img} alt={u.name} style={{width:"100%",aspectRatio:"1",objectFit:"cover",display:"block"}}/><div style={{position:"absolute",bottom:0,left:0,right:0,background:"linear-gradient(transparent,rgba(0,0,0,0.75))",padding:"20px 10px 8px"}}><div style={{fontSize:12,fontWeight:800,color:"#fff"}}>{u.name}</div><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:3}}><Badge status={u.status}/><span style={{fontSize:10,color:"rgba(255,255,255,0.7)",background:"rgba(0,0,0,0.4)",borderRadius:4,padding:"2px 5px"}}>{lbl}</span></div></div></div>)}</div>{shots.length===0&&<div style={{textAlign:"center",color:T.text3,padding:"40px 0",fontSize:13}}>No photos yet.</div>}</div>}
+      </div>
+    </div>;
+  }
+
+  return <div style={{minHeight:"100dvh",background:T.bg0,fontFamily:"inherit",color:T.text,display:"flex",flexDirection:"column"}}>
+    <div style={{borderBottom:"1px solid "+T.border,padding:"calc(14px + env(safe-area-inset-top)) 15px 13px",display:"flex",alignItems:"center",gap:10,background:T.bg1,position:"sticky",top:0,zIndex:50}}>
+      <button onClick={onBack} style={{background:"none",border:"none",color:T.text2,cursor:"pointer",width:36,height:36,display:"flex",alignItems:"center",justifyContent:"center",borderRadius:10}}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg></button>
+      <div style={{flex:1}}><div style={{fontSize:11,fontWeight:800,color:T.text3,letterSpacing:"0.10em",textTransform:"uppercase"}}>TABLETOP READY</div><h1 style={{margin:0,fontSize:16,fontWeight:800,color:T.text}}>{name}</h1></div>
+      {!isFollowing&&<Btn sm onClick={()=>onFollowBack(email)} sx={{opacity:busy?0.6:1}}>{busy?"...":"+ Follow"}</Btn>}
+    </div>
+    <div style={{flex:1,overflowY:"auto",padding:"12px 15px 40px",maxWidth:680,margin:"0 auto",width:"100%"}}>
+      <div style={{background:"#fff",borderRadius:18,padding:"18px",marginBottom:14,boxShadow:T.shadow,display:"flex",alignItems:"center",gap:14}}>
+        <div style={{width:56,height:56,borderRadius:"50%",background:col+"18",border:"2px solid "+col+"30",display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,fontWeight:800,color:col,flexShrink:0}}>{initials}</div>
+        <div style={{flex:1}}>
+          <div style={{fontSize:17,fontWeight:800,color:T.text}}>{name}</div>
+          <div style={{fontSize:13,color:T.text3,marginTop:2}}>{pjs.length} project{pjs.length!==1?"s":""} · {g.total} models · {pct}% painted</div>
+          <div style={{display:"flex",gap:8,marginTop:8,flexWrap:"wrap"}}>
+            {isFollowing&&<span style={{fontSize:12,background:T.green+"14",color:T.green,borderRadius:20,padding:"3px 10px",fontWeight:700}}>✓ Following</span>}
+            {isFollower&&!isFollowing&&<Btn sm v="ok" onClick={()=>onFollowBack(email)} sx={{opacity:busy?0.6:1}}>{busy?"...":"Follow back"}</Btn>}
+            {isFollower&&<span style={{fontSize:12,background:T.blue+"14",color:T.blue,borderRadius:20,padding:"3px 10px",fontWeight:700}}>Follows you</span>}
+          </div>
+        </div>
+      </div>
+      {vloading&&<div style={{textAlign:"center",padding:"40px 0",color:T.text3,fontSize:13}}>Loading projects...</div>}
+      {!vloading&&<>
+        <TabBar tabs={[{id:"projects",label:"Projects ("+pjs.length+")"},{id:"paints",label:"Paint List ("+paintNeeded.length+")"}]} active={vtab==="projects"||vtab==="paints"?vtab:"projects"} onChange={t=>setVtab(t)}/>
+        {vtab==="projects"&&<>
+          {pjs.length===0&&<div style={{textAlign:"center",color:T.text3,padding:"40px 0",fontSize:13}}>No projects yet.</div>}
+          {pjs.map((p,i)=>{const s=getStats(p);const pct2=s.total?Math.round(s.painted/s.total*100):0;
+            const photos=p.units.flatMap(u=>{const ph=safeP(u);return[ph.after,ph.wip,ph.before].filter(Boolean);}).slice(0,3);
+            return <div key={i} onClick={()=>{setVtab("units");setVpidx(i);}} style={{background:"#fff",borderRadius:18,padding:"16px 18px",marginBottom:10,cursor:"pointer",boxShadow:T.shadow}}>
+              {photos.length>0&&<div style={{display:"flex",gap:6,marginBottom:10}}>{photos.map((img,j)=><img key={j} src={img} alt="" style={{width:56,height:56,objectFit:"cover",borderRadius:10,display:"block"}}/>)}</div>}
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}><div><div style={{fontWeight:700,fontSize:15,color:T.text}}>{p.name}</div>{p.faction&&<div style={{fontSize:13,color:T.text3,marginTop:2}}>{p.faction}</div>}</div><div style={{textAlign:"right"}}><div style={{fontWeight:700,color:T.green,fontSize:18}}>{pct2}%</div><div style={{fontSize:11,color:T.text3}}>{s.total} models</div></div></div>
+              <Bar stats={s}/>
+              <div style={{fontSize:12,color:T.text3,marginTop:4}}>{p.units.length} units · {(p.recipes||[]).length} recipes · tap to view</div>
+            </div>;})}
+        </>}
+        {vtab==="paints"&&<>
+          {paintNeeded.length===0&&<div style={{textAlign:"center",color:T.text3,padding:"40px 0",fontSize:13}}><div style={{fontSize:32,marginBottom:8}}>🎨</div>No paint recipes yet.</div>}
+          {paintNeeded.map((p,i)=><div key={i} style={{background:"#fff",borderRadius:12,padding:"12px 16px",marginBottom:8,boxShadow:T.shadow,display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+            <div><div style={{fontSize:14,fontWeight:700,color:T.text}}>{p.name}</div>{(p.brand||p.type)&&<div style={{fontSize:12,color:T.text3,marginTop:1}}>{[p.brand,p.type].filter(Boolean).join(" · ")}</div>}</div>
+            <div style={{fontSize:11,color:T.text3,textAlign:"right",flexShrink:0,maxWidth:120}}>{p.projects.slice(0,2).join(", ")}{p.projects.length>2?" +more":""}</div>
+          </div>)}
+        </>}
+      </>}
+    </div>
+  </div>;
+}
+
 function Following({onClose,sess}){
   const [tab,setTab]=useState("following");
   const [followingList,setFollowingList]=useState([]);
@@ -1067,103 +1159,10 @@ function Following({onClose,sess}){
 
   // ── Profile viewer ──────────────────────────────────────────────────────────
   if(viewing){
-    const {email,name,loading:vloading,projects,profile}=viewing;
-    const col=acolor(name);
-    const pjs=projects||[];
-    const isFollowing=followingList.includes(email);
-    const isFollower=followerList.includes(email);
-
-    // Compute paint shopping list from their recipes
-    const paintNeeded=useMemo?useMemo(()=>{
-      const map={};
-      pjs.forEach(p=>(p.recipes||[]).forEach(r=>(r.steps||[]).forEach(s=>{
-        if(!s.paint)return;
-        const key=(s.brand||"")+s.paint;
-        if(!map[key])map[key]={name:s.paint,brand:s.brand||"",type:s.type||"",projects:new Set()};
-        map[key].projects.add(p.name);
-      })));
-      return Object.values(map).map(e=>({...e,projects:[...e.projects]})).sort((a,b)=>(a.brand+a.name).localeCompare(b.brand+b.name));
-    },[projects]):[];
-
-    const [vtab,setVtab]=useState("projects");
-    const [vpidx,setVpidx]=useState(null);
-
-    // Project detail view
-    if(vpidx!==null){
-      const p=pjs[vpidx];
-      const s=getStats(p);
-      const shots=p.units.flatMap(u=>{const ph=safeP(u);return[{img:ph.after,lbl:"After",u},{img:ph.wip,lbl:"WIP",u},{img:ph.before,lbl:"Before",u}].filter(x=>x.img);});
-      return <div style={{minHeight:"100dvh",background:T.bg0,fontFamily:"inherit",color:T.text}}>
-        <div style={{borderBottom:"1px solid "+T.border,padding:"calc(14px + env(safe-area-inset-top)) 15px 13px",display:"flex",alignItems:"center",gap:10,background:T.bg1,position:"sticky",top:0,zIndex:50}}>
-          <button onClick={()=>setVpidx(null)} style={{background:"none",border:"none",color:T.text2,cursor:"pointer",width:36,height:36,display:"flex",alignItems:"center",justifyContent:"center",borderRadius:10}}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg></button>
-          <div style={{flex:1,minWidth:0}}><div style={{fontSize:11,color:T.text3,fontWeight:700,textTransform:"uppercase",letterSpacing:"0.05em"}}>{name}</div><div style={{fontWeight:700,fontSize:16,color:T.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{p.name}{p.faction&&<span style={{fontWeight:400,color:T.text3,fontSize:13}}> · {p.faction}</span>}</div></div>
-        </div>
-        <div style={{padding:"12px 15px 40px",maxWidth:680,margin:"0 auto"}}>
-          <div style={{background:"#fff",borderRadius:14,padding:"14px",marginBottom:12,boxShadow:T.shadow}}><Bar stats={s}/><div style={{display:"flex",gap:10,flexWrap:"wrap",marginTop:6}}>{Object.entries(SC).map(([k,c])=><div key={k} style={{fontSize:12}}><span style={{color:T.text3}}>{c.label}: </span><span style={{color:c.color,fontWeight:700}}>{s[k]||0}</span></div>)}</div></div>
-          <TabBar tabs={[{id:"units",label:"Units ("+p.units.length+")"},{id:"recipes",label:"Recipes ("+(p.recipes||[]).length+")"},{id:"showcase",label:"Showcase"}]} active={vtab==="units"||vtab==="recipes"||vtab==="showcase"?vtab:"units"} onChange={t=>setVtab(t)}/>
-          {(vtab==="units"||vtab!=="recipes"&&vtab!=="showcase")&&p.units.map(u=>{const ph=safeP(u);const shots2=[{k:"before",l:"Before",v:ph.before},{k:"wip",l:"WIP",v:ph.wip},{k:"after",l:"After",v:ph.after}].filter(x=>x.v);return <div key={u.id} style={{background:"#fff",borderRadius:16,padding:"14px 16px",marginBottom:10,boxShadow:T.shadow}}>
-            {shots2.length>0&&<div style={{display:"flex",gap:6,marginBottom:10}}>{shots2.map(x=><div key={x.k} style={{position:"relative",flexShrink:0}}><img src={x.v} alt={x.l} style={{width:72,height:72,objectFit:"cover",borderRadius:10,display:"block"}}/><div style={{position:"absolute",bottom:2,left:2,background:"rgba(0,0,0,0.6)",borderRadius:4,padding:"2px 5px",fontSize:9,color:"#fff",fontWeight:700}}>{x.l}</div></div>)}</div>}
-            <div style={{fontWeight:700,fontSize:15,color:T.text,marginBottom:6}}>{u.name}</div>
-            <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}><Badge status={u.status}/><span style={{fontSize:13,color:T.text2}}>{u.models} model{u.models!==1?"s":""}</span></div>
-            {u.notes&&<div style={{marginTop:8,fontSize:12,color:T.text2,lineHeight:1.55,borderLeft:"2px solid "+T.border,paddingLeft:8,whiteSpace:"pre-wrap"}}>{u.notes}</div>}
-          </div>;})}
-          {vtab==="recipes"&&(p.recipes||[]).map(r=><RecipeCard key={r.id} recipe={r} readOnly onEdit={()=>{}} onDelete={()=>{}} onPaint={()=>{}}/>)}
-          {vtab==="showcase"&&<div><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>{shots.map(({img,lbl,u},i)=><div key={i} style={{borderRadius:14,overflow:"hidden",position:"relative"}}><img src={img} alt={u.name} style={{width:"100%",aspectRatio:"1",objectFit:"cover",display:"block"}}/><div style={{position:"absolute",bottom:0,left:0,right:0,background:"linear-gradient(transparent,rgba(0,0,0,0.75))",padding:"20px 10px 8px"}}><div style={{fontSize:12,fontWeight:800,color:"#fff"}}>{u.name}</div><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:3}}><Badge status={u.status}/><span style={{fontSize:10,color:"rgba(255,255,255,0.7)",background:"rgba(0,0,0,0.4)",borderRadius:4,padding:"2px 5px"}}>{lbl}</span></div></div></div>)}</div>{shots.length===0&&<div style={{textAlign:"center",color:T.text3,padding:"40px 0",fontSize:13}}>No photos yet.</div>}</div>}
-        </div>
-      </div>;
-    }
-
-    // Profile overview
-    const g={new_in_box:0,unbuilt:0,built:0,painted:0,total:0};
-    pjs.forEach(p=>{const s=getStats(p);Object.keys(g).forEach(k=>g[k]+=(s[k]||0));});
-    const pct=g.total?Math.round(g.painted/g.total*100):0;
-
-    return <div style={{minHeight:"100dvh",background:T.bg0,fontFamily:"inherit",color:T.text,display:"flex",flexDirection:"column"}}>
-      <div style={{borderBottom:"1px solid "+T.border,padding:"calc(14px + env(safe-area-inset-top)) 15px 13px",display:"flex",alignItems:"center",gap:10,background:T.bg1,position:"sticky",top:0,zIndex:50}}>
-        <button onClick={()=>setViewing(null)} style={{background:"none",border:"none",color:T.text2,cursor:"pointer",width:36,height:36,display:"flex",alignItems:"center",justifyContent:"center",borderRadius:10}}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg></button>
-        <div style={{flex:1}}><div style={{fontSize:11,fontWeight:800,color:T.text3,letterSpacing:"0.10em",textTransform:"uppercase"}}>TABLETOP READY</div><h1 style={{margin:0,fontSize:16,fontWeight:800,color:T.text}}>{name}</h1></div>
-        {!isFollowing&&<Btn sm onClick={()=>followBack(email)} sx={{opacity:busy?0.6:1}}>{busy?"...":"+ Follow"}</Btn>}
-      </div>
-      <div style={{flex:1,overflowY:"auto",padding:"12px 15px 40px",maxWidth:680,margin:"0 auto",width:"100%"}}>
-        {/* Profile header */}
-        <div style={{background:"#fff",borderRadius:18,padding:"18px",marginBottom:14,boxShadow:T.shadow,display:"flex",alignItems:"center",gap:14}}>
-          <div style={{width:56,height:56,borderRadius:"50%",background:col+"18",border:"2px solid "+col+"30",display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,fontWeight:800,color:col,flexShrink:0}}>{initials(name)}</div>
-          <div style={{flex:1}}>
-            <div style={{fontSize:17,fontWeight:800,color:T.text}}>{name}</div>
-            <div style={{fontSize:13,color:T.text3,marginTop:2}}>{pjs.length} project{pjs.length!==1?"s":""} · {g.total} models · {pct}% painted</div>
-            <div style={{display:"flex",gap:8,marginTop:8,flexWrap:"wrap"}}>
-              {isFollowing&&<span style={{fontSize:12,background:T.green+"14",color:T.green,borderRadius:20,padding:"3px 10px",fontWeight:700}}>✓ Following</span>}
-              {isFollower&&!isFollowing&&<Btn sm v="ok" onClick={()=>followBack(email)} sx={{opacity:busy?0.6:1}}>{busy?"...":"Follow back"}</Btn>}
-              {isFollower&&<span style={{fontSize:12,background:T.blue+"14",color:T.blue,borderRadius:20,padding:"3px 10px",fontWeight:700}}>Follows you</span>}
-            </div>
-          </div>
-        </div>
-        {vloading&&<div style={{textAlign:"center",padding:"40px 0",color:T.text3,fontSize:13}}>Loading projects...</div>}
-        {!vloading&&<>
-          <TabBar tabs={[{id:"projects",label:"Projects ("+pjs.length+")"},{id:"paints",label:"Paint List ("+paintNeeded.length+")"}]} active={vtab==="projects"||vtab==="paints"?vtab:"projects"} onChange={t=>setVtab(t)}/>
-          {(vtab==="projects"||vtab!=="paints")&&<>
-            {pjs.length===0&&<div style={{textAlign:"center",color:T.text3,padding:"40px 0",fontSize:13}}>No projects yet.</div>}
-            {pjs.map((p,i)=>{const s=getStats(p);const pct2=s.total?Math.round(s.painted/s.total*100):0;
-              // Find photos from units
-              const photos=p.units.flatMap(u=>{const ph=safeP(u);return[ph.after,ph.wip,ph.before].filter(Boolean);}).slice(0,3);
-              return <div key={i} onClick={()=>{setVtab("units");setVpidx(i);}} style={{background:"#fff",borderRadius:18,padding:"16px 18px",marginBottom:10,cursor:"pointer",boxShadow:T.shadow}}>
-                {photos.length>0&&<div style={{display:"flex",gap:6,marginBottom:10}}>{photos.map((img,j)=><img key={j} src={img} alt="" style={{width:56,height:56,objectFit:"cover",borderRadius:10,display:"block"}}/>)}</div>}
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}><div><div style={{fontWeight:700,fontSize:15,color:T.text}}>{p.name}</div>{p.faction&&<div style={{fontSize:13,color:T.text3,marginTop:2}}>{p.faction}</div>}</div><div style={{textAlign:"right"}}><div style={{fontWeight:700,color:T.green,fontSize:18}}>{pct2}%</div><div style={{fontSize:11,color:T.text3}}>{s.total} models</div></div></div>
-                <Bar stats={s}/>
-                <div style={{fontSize:12,color:T.text3,marginTop:4}}>{p.units.length} units · {(p.recipes||[]).length} recipes · tap to view</div>
-              </div>;})}
-          </>}
-          {vtab==="paints"&&<>
-            {paintNeeded.length===0&&<div style={{textAlign:"center",color:T.text3,padding:"40px 0",fontSize:13}}><div style={{fontSize:32,marginBottom:8}}>🎨</div>No paint recipes yet.</div>}
-            {paintNeeded.map((p,i)=><div key={i} style={{background:"#fff",borderRadius:12,padding:"12px 16px",marginBottom:8,boxShadow:T.shadow,display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
-              <div><div style={{fontSize:14,fontWeight:700,color:T.text}}>{p.name}</div>{(p.brand||p.type)&&<div style={{fontSize:12,color:T.text3,marginTop:1}}>{[p.brand,p.type].filter(Boolean).join(" · ")}</div>}</div>
-              <div style={{fontSize:11,color:T.text3,textAlign:"right",flexShrink:0,maxWidth:120}}>{p.projects.slice(0,2).join(", ")}{p.projects.length>2?" +more":""}</div>
-            </div>)}
-          </>}
-        </>}
-      </div>
-    </div>;
+    return <ProfileViewer viewing={viewing} followingList={followingList} followerList={followerList} onBack={()=>setViewing(null)} onFollowBack={followBack} busy={busy}/>;
   }
+
+
 
   // ── Main Following screen ───────────────────────────────────────────────────
   const activeTab=tab;
