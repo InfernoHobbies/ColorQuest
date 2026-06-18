@@ -118,11 +118,23 @@ async function sbSaveProfile(email,displayName,data){
 // Fetch a single public profile by email
 async function sbGetProfile(email){
   try{
-    const r=await fetch(SB_URL+"/rest/v1/tr_public_profiles?user_id=eq."+encodeURIComponent(email)+"&select=*",{headers:sbH()});
+    const e2=email.toLowerCase();
+    const r=await fetch(SB_URL+"/rest/v1/tr_public_profiles?user_id=ilike."+encodeURIComponent(e2)+"&select=*",{headers:sbH()});
     if(!r.ok)return null;
     const j=await r.json();
     return j&&j.length?j[0]:null;
   }catch(e){return null;}
+}
+
+// Check if a user exists via tr_user_data (always written on save, more reliable)
+async function sbUserExists(email){
+  try{
+    const e2=email.toLowerCase();
+    const r=await fetch(SB_URL+"/rest/v1/tr_user_data?user_id=ilike."+encodeURIComponent(e2)+"&select=user_id",{headers:sbH()});
+    if(!r.ok)return false;
+    const j=await r.json();
+    return j&&j.length>0;
+  }catch(e){return false;}
 }
 
 // Fetch all public profiles (for discovery / following list refresh)
@@ -1019,12 +1031,13 @@ function Following({onClose,sess}){
     if(raw===myEmail){setAddErr("You can't follow yourself.");return;}
     if(followingList.includes(raw)){setAddErr("Already following that person.");return;}
     setAddErr("");setBusy(true);
-    const profile=await sbGetProfile(raw);
-    if(!profile){setBusy(false);setAddErr("No Tabletop Ready account found for that email.");return;}
+    const exists=await sbUserExists(raw);
+    if(!exists){setBusy(false);setAddErr("No Tabletop Ready account found for that email. Make sure they have signed in at least once.");return;}
     const ok=await sbFollow(myEmail,raw);
     if(ok){
       setFollowingList(f=>[...f,raw]);
-      setLiveData(d=>({...d,[raw]:profile}));
+      // Load their profile in background
+      sbGetProfile(raw).then(profile=>{if(profile)setLiveData(d=>({...d,[raw]:profile}));});
       setAddEmail("");
     } else {setAddErr("Could not follow — try again.");}
     setBusy(false);
