@@ -114,7 +114,7 @@ function useAuth(){
     if(s&&s.expiresAt>Date.now()){if(s.sbJwt){_sbJwt=s.sbJwt;}setSess({token:s.token,email:s.email});}else{lsSet(TKEY,null);setSess(null);}
   },[]);
   useEffect(()=>{const t=setInterval(()=>{const s=lsGet(TKEY,null);if(s&&s.expiresAt&&s.expiresAt<Date.now()){lsSet(TKEY,null);_sbJwt=null;setSess(null);}},30000);return()=>clearInterval(t);},[]);
-  const signIn=useCallback(()=>{const redirectTo=encodeURIComponent("https://infernohobbies.github.io/ColorQuest/");window.location.href=SB_URL+"/auth/v1/authorize?provider=google&redirect_to="+redirectTo;},[]);
+  const signIn=useCallback(()=>{const redirectTo=encodeURIComponent("https://tabletop-ready.com");window.location.href=SB_URL+"/auth/v1/authorize?provider=google&redirect_to="+redirectTo;},[]);
   const signOut=useCallback(()=>{lsSet(TKEY,null);_sbJwt=null;setSess(null);},[]);
   return{sess,signIn,signOut};
 }
