@@ -91,7 +91,7 @@ async function sbLoad(email){
 // Save user data to Supabase (upsert)
 async function sbSave(email,payload){
   try{
-    const body=JSON.stringify({user_id:email,projects:payload.projects,paints:payload.paints,log:payload.log,updated_at:new Date().toISOString()});
+    const body=JSON.stringify({user_id:email,projects:payload.projects,log:payload.log,updated_at:new Date().toISOString()});
     const r=await fetch(SB_URL+"/rest/v1/tr_user_data",{
       method:"POST",
       headers:sbH({"Prefer":"resolution=merge-duplicates,return=minimal"}),
@@ -190,6 +190,39 @@ async function sbDeletePhoto(url){
       headers:{"apikey":SB_KEY,"Authorization":"Bearer "+(_sbJwt||SB_KEY)}
     });
   }catch(e){}
+}
+
+// ── Central paint catalogue ──────────────────────────────────────────────────
+let _paintCatalogue=null;
+async function sbLoadCatalogue(){
+  if(_paintCatalogue)return _paintCatalogue;
+  try{
+    const r=await fetch(SB_URL+"/rest/v1/paints?select=*&order=brand,type,name",{headers:sbH()});
+    if(!r.ok)return[];
+    const j=await r.json();
+    _paintCatalogue=j||[];
+    return _paintCatalogue;
+  }catch(e){return[];}
+}
+async function sbLoadUserPaints(email){
+  try{
+    const r=await fetch(SB_URL+"/rest/v1/user_paints?user_id=eq."+encodeURIComponent(email)+"&select=paint_id,owned",{headers:sbH()});
+    if(!r.ok)return{};
+    const j=await r.json();
+    const map={};(j||[]).forEach(p=>{map[p.paint_id]=p.owned;});
+    return map;
+  }catch(e){return{};}
+}
+async function sbToggleUserPaint(email,paintId,owned){
+  try{
+    const body=JSON.stringify({user_id:email,paint_id:paintId,owned});
+    const r=await fetch(SB_URL+"/rest/v1/user_paints",{
+      method:"POST",
+      headers:sbH({"Prefer":"resolution=merge-duplicates,return=minimal"}),
+      body
+    });
+    return r.ok||r.status===201||r.status===204;
+  }catch(e){return false;}
 }
 
 // ── Follow system (tr_follows table) ─────────────────────────────────────────
@@ -335,19 +368,49 @@ function useAuth(){
 
   return{sess,signIn,signOut};
 }
-function usePaints(){
-  const [paints,setPaints]=useState(()=>{
-    const fresh=lsGet(SK.paints,null);
-    if(fresh)return fresh;
-    const old=lsGet("cq-paints-v1",null)||lsGet("mr-paints-v1",null);
-    if(old)return old;
-    return DEF_PAINTS;
-  });
-  useEffect(()=>{lsSet(SK.paints,paints);},[paints]);
-  const addP=p=>{const np={...p,id:"p"+nid(),owned:p.owned!==undefined?p.owned:true};setPaints(ps=>[...ps,np]);return np;};
-  const delP=id=>setPaints(ps=>ps.filter(p=>p.id!==id));
-  const togP=id=>setPaints(ps=>ps.map(p=>p.id===id?{...p,owned:!p.owned}:p));
-  return{paints,setPaints,addP,delP,togP};
+function usePaints(sess){
+  const [catalogue,setCatalogue]=useState([]);
+  const [ownedMap,setOwnedMap]=useState({});// {paint_id: true/false}
+  const [catLoaded,setCatLoaded]=useState(false);
+
+  // Load central catalogue once
+  useEffect(()=>{
+    sbLoadCatalogue().then(cat=>{setCatalogue(cat);setCatLoaded(true);});
+  },[]);
+
+  // Load user's owned paints when signed in
+  useEffect(()=>{
+    if(!sess||!sess.email)return;
+    sbLoadUserPaints(sess.email).then(map=>setOwnedMap(map));
+  },[sess&&sess.email]);
+
+  // Convert catalogue + ownedMap into the paints array format the app expects
+  const paints=useMemo(()=>catalogue.map(p=>({
+    id:p.id,
+    brand:p.brand||"",
+    type:p.type||"",
+    name:p.name||"",
+    owned:ownedMap[p.id]===true,
+  })),[catalogue,ownedMap]);
+
+  const addP=p=>{
+    // For custom paints not in catalogue, add locally
+    const np={...p,id:"custom-"+nid(),owned:p.owned!==undefined?p.owned:true};
+    setCatalogue(c=>[...c,{id:np.id,brand:np.brand,type:np.type,name:np.name}]);
+    if(np.owned&&sess&&sess.email)sbToggleUserPaint(sess.email,np.id,true);
+    return np;
+  };
+  const delP=id=>{
+    setCatalogue(c=>c.filter(p=>p.id!==id));
+    setOwnedMap(m=>{const n={...m};delete n[id];return n;});
+  };
+  const togP=id=>{
+    const newOwned=!ownedMap[id];
+    setOwnedMap(m=>({...m,[id]:newOwned}));
+    if(sess&&sess.email)sbToggleUserPaint(sess.email,id,newOwned);
+  };
+
+  return{paints,catalogue,catLoaded,addP,delP,togP};
 }
 function useLog(){
   const [log,setLog]=useState(()=>lsGet(SK.log,[]));
@@ -439,7 +502,7 @@ function PaintPicker({step,onChange,paints,addP}){
   const own=useMemo(()=>step.paint&&paints.find(p=>p.name===step.paint&&(!step.brand||p.brand===step.brand)),[paints,step]);
   const [sav,setSav]=useState(false);
   const [nn,setNn]=useState("");
-  function doSave(){if(!nn.trim())return;addP({brand:step.brand||"Unknown",type:step.type||"Unknown",name:nn.trim(),owned:true});onChange({...step,paint:nn.trim()});setSav(false);setNn("");}
+  function doSave(){if(!nn.trim())return;addP({brand:step.brand||"",type:step.type||"",name:nn.trim(),owned:true});onChange({...step,paint:nn.trim()});setSav(false);setNn("");}
   const ss={...IS,padding:"8px 10px",fontSize:13};
   return <div style={{display:"flex",flexDirection:"column",gap:6}}>
     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
@@ -714,31 +777,82 @@ function Account({sess,status,err,onOut,onClose}){
   </div>;
 }
 
-function PaintLibrary({paints,addP,delP,togP,onClose,onNav}){
+function PaintLibrary({paints,catalogue,catLoaded,addP,delP,togP,onClose}){
   const [form,setForm]=useState({brand:"",type:"",name:"",owned:true});
   const [search,setSearch]=useState("");
   const [showBuy,setShowBuy]=useState(false);
-  const needCount=paints.filter(p=>!p.owned).length;
-  const filtered=useMemo(()=>{let r=paints.filter(p=>(p.name+" "+p.brand+" "+p.type).toLowerCase().includes(search.toLowerCase()));if(showBuy)r=r.filter(p=>!p.owned);return r;},[paints,search,showBuy]);
-  const grouped=useMemo(()=>{const g={};filtered.forEach(p=>{const k=p.brand||"Unknown";if(!g[k])g[k]={};const t=p.type||"Uncategorised";if(!g[k][t])g[k][t]=[];g[k][t].push(p);});return g;},[filtered]);
+  const [brandFilter,setBrandFilter]=useState("all");
+  const ownedCount=paints.filter(p=>p.owned).length;
+  const needCount=paints.filter(p=>!p.owned&&p.id.startsWith("custom-")).length;// only custom unowned shown in buy list
+  const brands=useMemo(()=>["all",...new Set(catalogue.map(p=>p.brand).filter(Boolean))].sort((a,b)=>a==="all"?-1:a.localeCompare(b)),[catalogue]);
+
+  const filtered=useMemo(()=>{
+    let r=paints;
+    if(brandFilter!=="all")r=r.filter(p=>p.brand===brandFilter);
+    if(search)r=r.filter(p=>(p.name+" "+p.brand+" "+p.type).toLowerCase().includes(search.toLowerCase()));
+    if(showBuy)r=r.filter(p=>!p.owned);
+    return r;
+  },[paints,search,showBuy,brandFilter]);
+
+  const grouped=useMemo(()=>{
+    const g={};
+    filtered.forEach(p=>{
+      const k=p.brand||"Unknown";
+      if(!g[k])g[k]={};
+      const t=p.type||"Uncategorised";
+      if(!g[k][t])g[k][t]=[];
+      g[k][t].push(p);
+    });
+    return g;
+  },[filtered]);
+
   function save(){if(!form.name.trim())return;addP({...form,name:form.name.trim()});setForm(f=>({...f,name:""}));}
+
   return <div style={{minHeight:"100dvh",background:T.bg0,fontFamily:"inherit",display:"flex",flexDirection:"column"}}>
     <div style={{borderBottom:"1px solid "+T.border,padding:"calc(14px + env(safe-area-inset-top)) 15px 13px",display:"flex",alignItems:"center",gap:10,background:T.bg1,position:"sticky",top:0,zIndex:50}}>
       <button onClick={onClose} style={{background:"none",border:"none",color:T.text2,cursor:"pointer",fontSize:20,width:36,height:36,display:"flex",alignItems:"center",justifyContent:"center",borderRadius:10}}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg></button>
       <div style={{flex:1}}><div style={{fontSize:11,fontWeight:800,color:T.text3,letterSpacing:"0.10em",textTransform:"uppercase"}}>TABLETOP READY</div><h1 style={{margin:0,fontSize:16,fontWeight:800,color:T.text}}>🎨 Paint Library</h1></div>
-      <span style={{fontSize:13,color:T.text3}}>{paints.length} paints</span>
+      <span style={{fontSize:13,color:T.text3}}>{ownedCount} owned</span>
     </div>
-    <div style={{flex:1,overflowY:"auto",padding:"12px 15px",maxWidth:680,margin:"0 auto",width:"100%",paddingBottom:"24px"}}>
-      {needCount>0&&<div style={{background:T.red+"10",border:"1px solid "+T.red+"25",borderRadius:10,padding:"10px 14px",marginBottom:14,display:"flex",justifyContent:"space-between",alignItems:"center"}}><span style={{fontSize:13,color:T.red}}>{needCount} paint{needCount!==1?"s":""} to buy</span><Btn sm v="sec" onClick={()=>setShowBuy(n=>!n)}>{showBuy?"Show all":"Shopping list"}</Btn></div>}
-      <div style={{background:"#fff",borderRadius:18,padding:"16px",marginBottom:16,boxShadow:T.shadow}}>
-        <div style={{fontSize:11,color:T.text3,fontWeight:700,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:10}}>Add Paint</div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}><Inp label="Brand" mb={0} placeholder="Citadel..." value={form.brand} onChange={e=>setForm(f=>({...f,brand:e.target.value}))}/><Inp label="Type" mb={0} placeholder="Base, Shade..." value={form.type} onChange={e=>setForm(f=>({...f,type:e.target.value}))}/></div>
-        <div style={{display:"flex",gap:8,alignItems:"flex-end",marginBottom:8}}><Inp label="Name" mb={0} placeholder="e.g. Macragge Blue" value={form.name} onChange={e=>setForm(f=>({...f,name:e.target.value}))} style={{flex:1}} onKeyDown={e=>e.key==="Enter"&&save()}/><Btn sm onClick={save} sx={{flexShrink:0,height:38}}>Add</Btn></div>
-        <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:13,color:T.text2}}><input type="checkbox" checked={form.owned} onChange={e=>setForm(f=>({...f,owned:e.target.checked}))} style={{width:16,height:16,accentColor:T.accent}}/>I own this paint</label>
-      </div>
-      <div style={{position:"relative",marginBottom:14}}><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search paints..." style={{...IS,paddingLeft:30}}/>{search&&<button onClick={()=>setSearch("")} style={{position:"absolute",right:8,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",color:T.text3,cursor:"pointer",fontSize:18}}>x</button>}</div>
-      {Object.entries(grouped).map(([brand,types])=><div key={brand} style={{marginBottom:12}}><div style={{fontSize:12,color:T.accent,fontWeight:800,letterSpacing:"0.06em",textTransform:"uppercase",marginBottom:6}}>{brand}</div>{Object.entries(types).map(([type,ps])=><div key={type} style={{background:"#fff",borderRadius:14,marginBottom:8,boxShadow:T.shadow,overflow:"hidden"}}><div style={{padding:"6px 12px",fontSize:11,color:T.text3,fontWeight:700,letterSpacing:"0.06em",textTransform:"uppercase",background:T.bg2,borderBottom:"1px solid "+T.border}}>{type}</div>{ps.map(p=><div key={p.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"9px 12px",borderBottom:"1px solid "+T.border}}><div style={{display:"flex",alignItems:"center",gap:10}}><button onClick={()=>togP(p.id)} style={{background:"none",border:"none",cursor:"pointer",fontSize:16,padding:0,width:24,height:24,flexShrink:0}}>{p.owned?"✅":"○"}</button><span style={{fontSize:13,color:p.owned?T.text:T.text3}}>{p.name}</span></div><button onClick={()=>delP(p.id)} style={{background:"none",border:"none",color:T.text3,cursor:"pointer",fontSize:16,padding:0,width:28,height:28,display:"flex",alignItems:"center",justifyContent:"center"}}>x</button></div>)}</div>)}</div>)}
-      {filtered.length===0&&<div style={{textAlign:"center",color:T.text3,padding:"40px 0",fontSize:13}}>{search||showBuy?"No paints match.":"No paints yet!"}</div>}
+    <div style={{flex:1,overflowY:"auto",padding:"12px 15px",maxWidth:680,margin:"0 auto",width:"100%",paddingBottom:"calc(80px + env(safe-area-inset-bottom))"}}>
+      {!catLoaded&&<div style={{textAlign:"center",padding:"40px 0",color:T.text3,fontSize:13}}>Loading paint catalogue...</div>}
+      {catLoaded&&<>
+        {/* Brand filter pills */}
+        <div style={{display:"flex",gap:6,overflowX:"auto",paddingBottom:8,marginBottom:8}}>
+          {brands.map(b=><button key={b} onClick={()=>setBrandFilter(b)} style={{flexShrink:0,background:brandFilter===b?T.accent:T.bg2,color:brandFilter===b?"#fff":T.text2,border:"none",borderRadius:20,padding:"6px 14px",fontSize:12,fontWeight:brandFilter===b?700:500,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>{b==="all"?"All Brands":b}</button>)}
+        </div>
+        {/* Search */}
+        <div style={{position:"relative",marginBottom:12}}>
+          <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search paints..." style={{...IS,paddingLeft:14}}/>
+          {search&&<button onClick={()=>setSearch("")} style={{position:"absolute",right:8,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",color:T.text3,cursor:"pointer",fontSize:18}}>x</button>}
+        </div>
+        {/* Toggle buy list */}
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+          <span style={{fontSize:13,color:T.text3}}>{filtered.length} paints</span>
+          <Btn sm v="sec" onClick={()=>setShowBuy(n=>!n)}>{showBuy?"Show all":"Not owned"}</Btn>
+        </div>
+        {/* Custom paint add */}
+        <div style={{background:"#fff",borderRadius:18,padding:"14px",marginBottom:14,boxShadow:T.shadow}}>
+          <div style={{fontSize:11,color:T.text3,fontWeight:700,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:10}}>Add Custom Paint</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}><Inp label="Brand" mb={0} placeholder="Citadel..." value={form.brand} onChange={e=>setForm(f=>({...f,brand:e.target.value}))}/><Inp label="Type" mb={0} placeholder="Base, Shade..." value={form.type} onChange={e=>setForm(f=>({...f,type:e.target.value}))}/></div>
+          <div style={{display:"flex",gap:8,alignItems:"flex-end"}}><Inp label="Name" mb={0} placeholder="e.g. Macragge Blue" value={form.name} onChange={e=>setForm(f=>({...f,name:e.target.value}))} style={{flex:1}} onKeyDown={e=>e.key==="Enter"&&save()}/><Btn sm onClick={save} sx={{flexShrink:0,height:38}}>Add</Btn></div>
+        </div>
+        {/* Paint list grouped by brand/type */}
+        {Object.entries(grouped).map(([brand,types])=><div key={brand} style={{marginBottom:12}}>
+          <div style={{fontSize:12,color:T.accent,fontWeight:800,letterSpacing:"0.06em",textTransform:"uppercase",marginBottom:6}}>{brand}</div>
+          {Object.entries(types).map(([type,ps])=><div key={type} style={{background:"#fff",borderRadius:14,marginBottom:8,boxShadow:T.shadow,overflow:"hidden"}}>
+            <div style={{padding:"6px 12px",fontSize:11,color:T.text3,fontWeight:700,letterSpacing:"0.06em",textTransform:"uppercase",background:T.bg2,borderBottom:"1px solid "+T.border}}>{type}</div>
+            {ps.map(p=><div key={p.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 12px",borderBottom:"1px solid "+T.border}}>
+              <div style={{display:"flex",alignItems:"center",gap:10}}>
+                <button onClick={()=>togP(p.id)} style={{background:"none",border:"none",cursor:"pointer",fontSize:18,padding:0,width:24,height:24,flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center"}}>{p.owned?"✅":"○"}</button>
+                <span style={{fontSize:13,color:p.owned?T.text:T.text3}}>{p.name}</span>
+              </div>
+              {p.id.startsWith("custom-")&&<button onClick={()=>delP(p.id)} style={{background:"none",border:"none",color:T.text3,cursor:"pointer",fontSize:16,padding:0,width:28,height:28,display:"flex",alignItems:"center",justifyContent:"center"}}>x</button>}
+            </div>)}
+          </div>)}
+        </div>)}
+        {filtered.length===0&&<div style={{textAlign:"center",color:T.text3,padding:"40px 0",fontSize:13}}>{search||showBuy?"No paints match.":"No paints yet!"}</div>}
+      </>}
     </div>
     {/* Bottom nav */}
     <div style={{position:"fixed",bottom:0,left:0,right:0,background:"#fff",borderTop:"1px solid "+T.border,display:"flex",zIndex:100,paddingBottom:"env(safe-area-inset-bottom)"}}>
@@ -1264,7 +1378,7 @@ function App(){
     if(old)return old;
     return DEF_DATA;
   });
-  const {paints,setPaints,addP,delP,togP}=usePaints();
+  const {paints,catalogue,catLoaded,addP,delP,togP}=usePaints(sess);
   const {log,setLog,addE}=useLog();
   const [syncSt,setSyncSt]=useState("idle");
   const [syncErr,setSyncErr]=useState(null);
@@ -1297,11 +1411,11 @@ function App(){
       const cloud=await sbLoad(sess.email);
       if(cloud){
         if(cloud.projects&&cloud.projects.length)setData({projects:cloud.projects});
-        if(cloud.paints&&cloud.paints.length)setPaints(cloud.paints);
+        // paints now loaded separately via user_paints table
         if(cloud.log&&cloud.log.length)setLog(cloud.log);
       } else {
         // First time — push local data up
-        await sbSave(sess.email,{projects:data.projects,paints,log});
+        await sbSave(sess.email,{projects:data.projects,log});
       }
       setCloudLoaded(true);
       setSyncSt("synced");
@@ -1316,7 +1430,7 @@ function App(){
     const t=setTimeout(async()=>{
       const dn=lsGet(SK.dname,"");
       const [ok]=await Promise.all([
-        sbSave(sess.email,{projects:data.projects,paints,log}),
+        sbSave(sess.email,{projects:data.projects,log}),
         sbSaveProfile(sess.email,dn,data),
       ]);
       if(ok){setSyncSt("synced");setSyncErr(null);}
@@ -1357,7 +1471,7 @@ function App(){
 
   if(sess===undefined)return <div style={{minHeight:"100dvh",background:T.bg0,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"inherit"}}><div style={{color:T.accent,fontSize:13,fontWeight:700,letterSpacing:"0.15em"}}>LOADING...</div></div>;
   if(!sess&&!skipLogin)return <Login onSignIn={signIn} onSkip={()=>{lsSet(SK.skip,true);setSkipLogin(true);}}/>;
-  if(screen==="paints")return <PaintLibrary paints={paints} addP={addP} delP={delP} togP={togP} onClose={id=>setScreen(id&&typeof id==="string"?id:"projects")}/>;
+  if(screen==="paints")return <PaintLibrary paints={paints} catalogue={catalogue} catLoaded={catLoaded} addP={addP} delP={delP} togP={togP} onClose={id=>setScreen(id&&typeof id==="string"?id:"projects")}/>;
   if(screen==="shopping")return <ShoppingList data={data} paints={paints} onClose={()=>setScreen("projects")}/>;
   if(screen==="following")return <Following onClose={id=>setScreen(id&&typeof id==="string"?id:"dashboard")} sess={sess}/>;
   if(screen==="account")return <Account sess={sess} status={syncSt} err={syncErr} onOut={()=>{signOut();setSkipLogin(false);lsSet(SK.skip,false);setScreen("dashboard");}} onClose={()=>setScreen("dashboard")}/>;
