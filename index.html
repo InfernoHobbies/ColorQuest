@@ -25,6 +25,10 @@ body{-webkit-tap-highlight-color:transparent;font-family:'Inter',-apple-system,B
 <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
+</script>
+<script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
 <script type="text/babel">
 const {useState,useEffect,useMemo,useRef,useCallback} = React;
 
@@ -294,6 +298,35 @@ const lsSet=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v));}catch(e){}};
 const DEF_PAINTS=[{id:"p1",brand:"Citadel",type:"Base",name:"Macragge Blue",owned:true},{id:"p2",brand:"Citadel",type:"Base",name:"Abaddon Black",owned:true},{id:"p3",brand:"Citadel",type:"Base",name:"Leadbelcher",owned:true},{id:"p4",brand:"Citadel",type:"Shade",name:"Nuln Oil",owned:true},{id:"p5",brand:"Citadel",type:"Shade",name:"Agrax Earthshade",owned:true},{id:"p6",brand:"Citadel",type:"Layer",name:"Calgar Blue",owned:true},{id:"p7",brand:"Citadel",type:"Layer",name:"Fenrisian Grey",owned:true},{id:"p8",brand:"Citadel",type:"Dry",name:"Ironbreaker",owned:true},{id:"p9",brand:"Citadel",type:"Contrast",name:"Blood Angels Red",owned:false},{id:"p10",brand:"Vallejo",type:"Model Color",name:"Flat Black",owned:true},{id:"p11",brand:"Army Painter",type:"Primer",name:"Matt Black",owned:true}];
 const DEF_DATA={projects:[]};
 
+// ── Progress stages ──────────────────────────────────────────────────────────
+const STAGES=["assembled","primed","base_colours","shaded","highlighted","based","transfers"];
+const STAGE_LABELS={assembled:"Assembled",primed:"Primed",base_colours:"Base Colours",shaded:"Shaded",highlighted:"Highlighted",based:"Based",transfers:"Transfers"};
+const STAGE_ICONS={assembled:"🔧",primed:"◻️",base_colours:"🎨",shaded:"🌓",highlighted:"⭐",based:"🟤",transfers:"📋"};
+
+// Derive legacy status from stages for backwards compat & stats
+function stagesToStatus(stages){
+  if(!stages||!stages.length)return"new_in_box";
+  const s=new Set(stages);
+  if(s.has("transfers")||s.has("based")||s.has("highlighted"))return"painted";
+  if(s.has("primed")||s.has("base_colours")||s.has("shaded"))return"built";
+  if(s.has("assembled"))return"built";
+  return"new_in_box";
+}
+// Progress colour based on stages
+function stagesColor(stages){
+  if(!stages||!stages.length)return T.red;
+  const s=new Set(stages);
+  if(STAGES.every(st=>s.has(st)))return T.green;
+  if(s.has("primed"))return T.blue;
+  if(s.has("assembled"))return T.yellow;
+  return T.red;
+}
+function stagesPct(stages){
+  if(!stages||!stages.length)return 0;
+  return Math.round((stages.length/STAGES.length)*100);
+}
+
+// Keep SC for backwards compat with shared/read-only views
 const SC={new_in_box:{label:"New in Box",color:T.accent,bg:T.accentLight},unbuilt:{label:"Unbuilt",color:T.yellow,bg:T.yellowDim},built:{label:"Built",color:T.blue,bg:T.blueDim},painted:{label:"Painted",color:T.green,bg:T.greenDim}};
 const ICONS={new_in_box:"📦",unbuilt:"🔩",built:"🔧",painted:"🎨"};
 const SCYCLE=["new_in_box","unbuilt","built","painted"];
@@ -302,7 +335,22 @@ const SCOLS=[T.accent,T.blue,T.green,T.yellow,T.red,T.orange,"#7c3aed","#0891b2"
 const MONTHS=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 
 const nid=()=>Date.now()+Math.floor(Math.random()*9999);
-const getStats=p=>{const s={new_in_box:0,unbuilt:0,built:0,painted:0,total:0};(p.units||[]).forEach(u=>{s[u.status]=(s[u.status]||0)+u.models;s.total+=u.models;});return s;};
+const getStats=p=>{
+  const s={new_in_box:0,unbuilt:0,built:0,painted:0,total:0};
+  (p.units||[]).forEach(u=>{
+    const subs=u.subgroups&&u.subgroups.length?u.subgroups:null;
+    if(subs){
+      subs.forEach(sg=>{
+        const st=sg.stages?stagesToStatus(sg.stages):(sg.status||"new_in_box");
+        s[st]=(s[st]||0)+sg.models;s.total+=sg.models;
+      });
+    } else {
+      const st=u.stages?stagesToStatus(u.stages):(u.status||"new_in_box");
+      s[st]=(s[st]||0)+u.models;s.total+=u.models;
+    }
+  });
+  return s;
+};
 const safeP=u=>{if(u.photos&&typeof u.photos==="object"&&!Array.isArray(u.photos))return u.photos;if(u.photo)return{before:null,wip:null,after:u.photo};return{before:null,wip:null,after:null};};
 
 function encShr(projects,by){try{return btoa(unescape(encodeURIComponent(JSON.stringify({_tr:1,by:by||"",projects}))));}catch(e){return null;}}
@@ -382,7 +430,7 @@ function usePaints(sess){
   useEffect(()=>{
     if(!sess||!sess.email)return;
     sbLoadUserPaints(sess.email).then(map=>setOwnedMap(map));
-  },[sess&&sess.email]);
+  },[sess]);
 
   // Convert catalogue + ownedMap into the paints array format the app expects
   const paints=useMemo(()=>catalogue.map(p=>({
@@ -626,6 +674,38 @@ function PaintMode({recipe,onClose,paints}){
   </div>;
 }
 
+function StageChecklist({stages,onChange,models,label}){
+  const set=new Set(stages||[]);
+  function toggle(stage){
+    const n=new Set(set);
+    if(n.has(stage))n.delete(stage);
+    else n.add(stage);
+    onChange([...n]);
+  }
+  const col=stagesColor([...set]);
+  const pct=stagesPct([...set]);
+  return <div style={{marginTop:8}}>
+    {label&&<div style={{fontSize:11,color:T.text3,fontWeight:700,textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:6}}>{label} — {models} model{models!==1?"s":""}</div>}
+    <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+      <div style={{flex:1,height:6,borderRadius:3,background:T.bg2,overflow:"hidden"}}>
+        <div style={{height:"100%",width:pct+"%",background:col,borderRadius:3,transition:"width 0.3s"}}/>
+      </div>
+      <span style={{fontSize:11,fontWeight:700,color:col,minWidth:32,textAlign:"right"}}>{pct}%</span>
+    </div>
+    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:4}}>
+      {STAGES.map(stage=>{
+        const checked=set.has(stage);
+        return <button key={stage} onClick={()=>toggle(stage)} style={{display:"flex",alignItems:"center",gap:7,padding:"7px 10px",borderRadius:10,border:"1px solid "+(checked?col+"40":T.border),background:checked?col+"12":"transparent",cursor:"pointer",fontFamily:"inherit",textAlign:"left"}}>
+          <div style={{width:16,height:16,borderRadius:4,border:"2px solid "+(checked?col:T.border2),background:checked?col:"transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,transition:"all 0.15s"}}>
+            {checked&&<svg width="9" height="9" viewBox="0 0 10 10"><polyline points="1,5 4,8 9,2" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+          </div>
+          <span style={{fontSize:12,fontWeight:checked?700:400,color:checked?col:T.text3}}>{STAGE_ICONS[stage]} {STAGE_LABELS[stage]}</span>
+        </button>;
+      })}
+    </div>
+  </div>;
+}
+
 function UnitCardMenu({unit,onEdit,onDelete,onSplit,onDupe}){
   const [open,setOpen]=useState(false);
   const ref=useRef();
@@ -647,10 +727,28 @@ function UnitCardMenu({unit,onEdit,onDelete,onSplit,onDupe}){
   </div>;
 }
 
-function UnitCard({unit,onEdit,onDelete,onStatus,onSplit,onDupe,onUpdateSubgroups}){
-  const next=()=>{const i=SCYCLE.indexOf(unit.status);return SCYCLE[(i+1)%SCYCLE.length];};
+function UnitCard({unit,onEdit,onDelete,onStages,onSplit,onDupe,onUpdateSubgroups}){
+  const stages=unit.stages||[];
+  const col=stagesColor(stages);
+  const pct=stagesPct(stages);
   const ph=safeP(unit);
   const shots=[{k:"before",l:"Before",v:ph.before},{k:"wip",l:"WIP",v:ph.wip},{k:"after",l:"After",v:ph.after}].filter(s=>s.v);
+
+  // Subgroup auto-merge: if all subgroups have same stages, collapse to parent
+  function handleSubgroupStages(idx,newStages){
+    const sgs=unit.subgroups.map((sg,i)=>i===idx?{...sg,stages:newStages}:sg);
+    // Check if all subgroups now have identical stages
+    const first=JSON.stringify([...sgs[0].stages||[]].sort());
+    const allSame=sgs.every(sg=>JSON.stringify([...sg.stages||[]].sort())===first);
+    if(allSame){
+      // Merge into parent
+      onUpdateSubgroups(unit.id,null);
+      onStages(unit.id,sgs[0].stages||[]);
+    } else {
+      onUpdateSubgroups(unit.id,sgs);
+    }
+  }
+
   return <div style={{background:T.bg1,borderRadius:16,padding:"14px 16px",marginBottom:10,boxShadow:T.shadow}}>
     {shots.length>0&&<div style={{display:"flex",gap:6,marginBottom:12}}>
       {shots.map(s=><div key={s.k} style={{position:"relative",flexShrink:0}}>
@@ -658,27 +756,32 @@ function UnitCard({unit,onEdit,onDelete,onStatus,onSplit,onDupe,onUpdateSubgroup
         <div style={{position:"absolute",bottom:3,left:3,background:"rgba(0,0,0,0.6)",borderRadius:4,padding:"2px 5px",fontSize:9,color:"#fff",fontWeight:600,letterSpacing:"0.04em"}}>{s.l}</div>
       </div>)}
     </div>}
-    <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8,marginBottom:10}}>
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8,marginBottom:8}}>
       <div style={{flex:1,minWidth:0}}>
-        <div style={{fontWeight:700,fontSize:16,color:T.text,lineHeight:1.2,marginBottom:2,letterSpacing:"-0.01em"}}>{unit.name}</div>
+        <div style={{fontWeight:700,fontSize:16,color:T.text,lineHeight:1.2,marginBottom:2}}>{unit.name}</div>
         <div style={{fontSize:13,color:T.text3}}>{unit.models} model{unit.models!==1?"s":""}</div>
       </div>
       <UnitCardMenu unit={unit} onEdit={onEdit} onDelete={onDelete} onSplit={onSplit} onDupe={onDupe}/>
     </div>
-    <div style={{display:"flex",alignItems:"center",gap:8}}>
-      <button onClick={()=>onStatus(unit.id,next())} style={{background:"none",border:"none",padding:0,cursor:"pointer",flexShrink:0}}><Badge status={unit.status}/></button>
-      <span style={{fontSize:12,color:T.text3}}>Tap to update</span>
+    {/* Progress bar */}
+    <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+      <div style={{flex:1,height:6,borderRadius:3,background:T.bg2,overflow:"hidden"}}>
+        <div style={{height:"100%",width:pct+"%",background:col,borderRadius:3,transition:"width 0.3s"}}/>
+      </div>
+      <span style={{fontSize:11,fontWeight:700,color:col,minWidth:32,textAlign:"right"}}>{pct}%</span>
     </div>
-    {unit.subgroups&&unit.subgroups.length>0&&<div style={{marginTop:8,borderTop:"1px solid "+T.border,paddingTop:8}}>
-      <div style={{fontSize:11,color:T.text3,fontWeight:700,textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:6}}>Groups — tap badge to update, x to remove</div>
-      {unit.subgroups.map((sg,i)=>{
-        const nextSt=()=>{const idx=SCYCLE.indexOf(sg.status);return SCYCLE[(idx+1)%SCYCLE.length];};
-        return <div key={i} style={{display:"flex",alignItems:"center",gap:8,marginBottom:6,paddingLeft:8,borderLeft:"3px solid "+(SC[sg.status]?SC[sg.status].color:T.border)}}>
-          <span style={{fontSize:13,fontWeight:700,color:T.text,minWidth:24}}>{sg.models}x</span>
-          <button onClick={()=>{const sgs=unit.subgroups.map((s,j)=>j===i?{...s,status:nextSt()}:s);onStatus&&onUpdateSubgroups(unit.id,sgs);}} style={{background:"none",border:"none",padding:0,cursor:"pointer"}}><Badge status={sg.status}/></button>
-          <button onClick={()=>{const sgs=unit.subgroups.filter((_,j)=>j!==i);onUpdateSubgroups(unit.id,sgs.length?sgs:null);}} style={{background:"none",border:"none",color:T.text3,cursor:"pointer",fontSize:16,marginLeft:"auto",padding:"2px 6px"}}>x</button>
-        </div>;
-      })}
+    {/* Stage checklist (no subgroups) */}
+    {!unit.subgroups&&<StageChecklist stages={stages} onChange={s=>onStages(unit.id,s)} models={unit.models}/>}
+    {/* Subgroups */}
+    {unit.subgroups&&unit.subgroups.length>0&&<div style={{marginTop:8,borderTop:"1px solid "+T.border,paddingTop:10}}>
+      <div style={{fontSize:11,color:T.text3,fontWeight:700,textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:8,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <span>Groups</span>
+        <button onClick={()=>onUpdateSubgroups(unit.id,null)} style={{background:"none",border:"1px solid "+T.border,borderRadius:6,padding:"2px 8px",fontSize:10,color:T.text3,cursor:"pointer",fontFamily:"inherit"}}>Merge all</button>
+      </div>
+      {unit.subgroups.map((sg,i)=><div key={i} style={{background:T.bg2,borderRadius:12,padding:"10px 12px",marginBottom:8}}>
+        <StageChecklist stages={sg.stages||[]} onChange={s=>handleSubgroupStages(i,s)} models={sg.models} label={"Group "+(i+1)}/>
+        <button onClick={()=>{const sgs=unit.subgroups.filter((_,j)=>j!==i);onUpdateSubgroups(unit.id,sgs.length?sgs:null);}} style={{marginTop:6,background:"none",border:"none",color:T.text3,cursor:"pointer",fontSize:11,padding:0,fontFamily:"inherit"}}>Remove group</button>
+      </div>)}
     </div>}
     {unit.notes&&<div style={{marginTop:8,fontSize:12,color:T.text2,lineHeight:1.55,borderLeft:"2px solid "+T.border,paddingLeft:8,whiteSpace:"pre-wrap"}}>{unit.notes}</div>}
   </div>;
@@ -686,14 +789,13 @@ function UnitCard({unit,onEdit,onDelete,onStatus,onSplit,onDupe,onUpdateSubgroup
 
 function SplitModal({unit,onSave,onClose}){
   const [countStr,setCountStr]=useState(String(Math.floor(unit.models/2)));
-  const [stat,setStat]=useState("built");
+  const [stat,setStat]=useState("built");// kept for compat but not shown
   const count=parseInt(countStr)||0;
   const rem=unit.models-count;
   const valid=count>=1&&count<unit.models;
   function save(){
     if(!valid)return;
-    // Replace subgroups entirely with a fresh split - cleaner than appending
-    const sgs=[{id:nid(),models:count,status:stat},{id:nid(),models:rem,status:unit.status}];
+    const sgs=[{id:nid(),models:count,stages:[...unit.stages||[]]},{id:nid(),models:rem,stages:[...unit.stages||[]]}];
     onSave({...unit,subgroups:sgs});
     onClose();
   }
@@ -710,12 +812,10 @@ function SplitModal({unit,onSave,onClose}){
         style={{...IS,fontSize:16}}
       />
     </Field>
-    <Sel label="Status for first group" value={stat} onChange={e=>setStat(e.target.value)}>
-      {Object.entries(SC).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
-    </Sel>
     <div style={{background:T.bg2,borderRadius:10,padding:"10px 12px",marginBottom:14,fontSize:13}}>
-      <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}><span style={{color:T.text2}}>Group 1:</span><span style={{fontWeight:700,color:SC[stat]?SC[stat].color:T.text}}>{valid?count:"?"}x {SC[stat]?SC[stat].label:stat}</span></div>
-      <div style={{display:"flex",justifyContent:"space-between"}}><span style={{color:T.text2}}>Group 2:</span><span style={{fontWeight:700,color:SC[unit.status]?SC[unit.status].color:T.text}}>{valid?rem:"?"}x {SC[unit.status]?SC[unit.status].label:unit.status}</span></div>
+      <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}><span style={{color:T.text2}}>Group 1:</span><span style={{fontWeight:700,color:T.blue}}>{valid?count:"?"} models</span></div>
+      <div style={{display:"flex",justifyContent:"space-between"}}><span style={{color:T.text2}}>Group 2:</span><span style={{fontWeight:700,color:T.blue}}>{valid?rem:"?"} models</span></div>
+      <div style={{fontSize:12,color:T.text3,marginTop:6}}>Both groups start with the same progress as the parent unit.</div>
     </div>
     {!valid&&<div style={{fontSize:12,color:T.red,marginBottom:12}}>Enter a number between 1 and {unit.models-1}.</div>}
     <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}><Btn v="sec" sm onClick={onClose}>Cancel</Btn><Btn sm onClick={save} disabled={!valid} sx={{opacity:valid?1:0.4}}>Split</Btn></div>
@@ -1448,12 +1548,26 @@ function App(){
   const saveProject=()=>{mut(ps=>ps.map(p=>p.id===editTgt?{...p,name:form.name?form.name.trim():p.name,faction:form.faction!==undefined?form.faction.trim():p.faction}:p));close();};
   const delProject=id=>{mut(ps=>ps.filter(p=>p.id!==id));setScreen("projects");};
 
-  const addUnit=()=>{if(!form.name||!form.name.trim())return;const u={id:nid(),name:form.name.trim(),models:parseInt(form.models)||1,status:form.status||"new_in_box",notes:form.notes||"",photos:form.photos||{before:null,wip:null,after:null},subgroups:null};mut(ps=>ps.map(p=>p.id===pid?{...p,units:[...p.units,u]}:p));close();};
-  const saveUnit=()=>{mut(ps=>ps.map(p=>p.id===pid?{...p,units:p.units.map(u=>u.id===editTgt?{...u,name:form.name?form.name.trim():u.name,models:parseInt(form.models)||u.models,status:form.status||u.status,notes:form.notes!==undefined?form.notes:u.notes,photos:form.photos!==undefined?form.photos:safeP(u),subgroups:form.subgroups!==undefined?form.subgroups:u.subgroups}:u)}:p));close();};
+  const addUnit=()=>{if(!form.name||!form.name.trim())return;const u={id:nid(),name:form.name.trim(),models:parseInt(form.models)||1,stages:[],status:"new_in_box",notes:form.notes||"",photos:form.photos||{before:null,wip:null,after:null},subgroups:null};mut(ps=>ps.map(p=>p.id===pid?{...p,units:[...p.units,u]}:p));close();};
+  const saveUnit=()=>{mut(ps=>ps.map(p=>p.id===pid?{...p,units:p.units.map(u=>u.id===editTgt?{...u,name:form.name?form.name.trim():u.name,models:parseInt(form.models)||u.models,stages:form.stages!==undefined?form.stages:u.stages||[],status:form.stages!==undefined?stagesToStatus(form.stages):(u.status||"new_in_box"),notes:form.notes!==undefined?form.notes:u.notes,photos:form.photos!==undefined?form.photos:safeP(u),subgroups:form.subgroups!==undefined?form.subgroups:u.subgroups}:u)}:p));close();};
   const delUnit=id=>mut(ps=>ps.map(p=>p.id===pid?{...p,units:p.units.filter(u=>u.id!==id)}:p));
-  const chgStatus=(uid,newSt)=>{const proj=data.projects.find(p=>p.id===pid);const unit=proj&&proj.units.find(u=>u.id===uid);if(unit)addE(proj.name,unit.name,unit.models,unit.status,newSt);mut(ps=>ps.map(p=>p.id===pid?{...p,units:p.units.map(u=>u.id===uid?{...u,status:newSt}:u)}:p));toast2(unit?unit.name+" updated":"Updated");};
-  const updSubgroups=(uid,sgs)=>{mut(ps=>ps.map(p=>p.id===pid?{...p,units:p.units.map(u=>u.id===uid?{...u,subgroups:sgs}:u)}:p));};
-  const dupUnit=u=>{const copy={...u,id:nid(),name:u.name+" (copy)",status:"new_in_box",subgroups:null,photos:{before:null,wip:null,after:null}};mut(ps=>ps.map(p=>p.id===pid?{...p,units:[...p.units,copy]}:p));toast2("Duplicated: "+u.name);};
+  const chgStages=(uid,newStages)=>{
+  const proj=data.projects.find(p=>p.id===pid);
+  const unit=proj&&proj.units.find(u=>u.id===uid);
+  const oldStatus=unit?(unit.stages?stagesToStatus(unit.stages):unit.status||"new_in_box"):"new_in_box";
+  const newStatus=stagesToStatus(newStages);
+  if(unit&&oldStatus!==newStatus)addE(proj.name,unit.name,unit.models,oldStatus,newStatus);
+  mut(ps=>ps.map(p=>p.id===pid?{...p,units:p.units.map(u=>u.id===uid?{...u,stages:newStages,status:newStatus}:u)}:p));
+};
+  const updSubgroups=(uid,sgs)=>{
+  mut(ps=>ps.map(p=>p.id===pid?{...p,units:p.units.map(u=>{
+    if(u.id!==uid)return u;
+    // Derive parent status from subgroups if present
+    const newStatus=sgs?stagesToStatus(sgs[0]&&sgs[0].stages||[]):stagesToStatus(u.stages||[]);
+    return{...u,subgroups:sgs,status:newStatus};
+  })}:p));
+};
+  const dupUnit=u=>{const copy={...u,id:nid(),name:u.name+" (copy)",stages:[],status:"new_in_box",subgroups:null,photos:{before:null,wip:null,after:null}};mut(ps=>ps.map(p=>p.id===pid?{...p,units:[...p.units,copy]}:p));toast2("Duplicated: "+u.name);};
 
   const saveRecipe=recipe=>{if(recMod&&recMod.mode==="add"){const r={...recipe,id:nid()};mut(ps=>ps.map(p=>p.id===pid?{...p,recipes:[...(p.recipes||[]),r]}:p));}else{mut(ps=>ps.map(p=>p.id===pid?{...p,recipes:(p.recipes||[]).map(r=>r.id===recipe.id?recipe:r)}:p));}setRecMod(null);};
   const delRecipe=id=>mut(ps=>ps.map(p=>p.id===pid?{...p,recipes:(p.recipes||[]).filter(r=>r.id!==id)}:p));
@@ -1464,7 +1578,7 @@ function App(){
   function expProject(p){dlJSON({_tr:1,exported:new Date().toISOString(),project:p},p.name.replace(/[^a-z0-9]/gi,"_")+".mrp");}
 
   const project=data.projects.find(p=>p.id===pid);
-  const filteredUnits=project?project.units.filter(u=>(filter==="all"||u.status===filter)&&(!search||u.name.toLowerCase().includes(search.toLowerCase())||(u.notes||"").toLowerCase().includes(search.toLowerCase()))):[];
+  const filteredUnits=project?project.units.filter(u=>{const st=u.stages||[];const matchStage=filter==="all"||(filter==="none"&&!st.length)||(STAGES.includes(filter)&&st.includes(filter));const matchSearch=!search||u.name.toLowerCase().includes(search.toLowerCase())||(u.notes||"").toLowerCase().includes(search.toLowerCase());return matchStage&&matchSearch;}):[];
   const shownProjects=data.projects.filter(p=>!search||p.name.toLowerCase().includes(search.toLowerCase())||(p.faction||"").toLowerCase().includes(search.toLowerCase())||p.units.some(u=>u.name.toLowerCase().includes(search.toLowerCase())));
 
   function goTo(id){setPid(id);setScreen("detail");setSearch("");setTab("units");}
@@ -1563,10 +1677,10 @@ function App(){
         <TabBar tabs={[{id:"units",label:"Units ("+project.units.length+")"},{id:"recipes",label:"Recipes ("+(project.recipes||[]).length+")"},{id:"showcase",label:"Showcase"}]} active={tab} onChange={setTab}/>
         {tab==="units"&&<>
           <div style={{display:"flex",gap:6,marginBottom:12,overflowX:"auto",paddingBottom:2}}>
-            {[["all","All",null],...Object.entries(SC).map(([k,v])=>[k,ICONS[k],v.color])].map(([k,icon,color])=>{
+            {[{k:"all",label:"All",color:null},...STAGES.map(s=>({k:s,label:STAGE_LABELS[s],color:T.accent})),{k:"none",label:"Not Started",color:T.red}].map(({k,label,color})=>{
               const active=filter===k;
               return <button key={k} onClick={()=>setFilter(k)} style={{flexShrink:0,display:"flex",alignItems:"center",gap:5,background:active?(color?color+"18":T.accentDim):"transparent",border:"1px solid "+(active?(color||T.accent)+"40":T.border),borderRadius:20,padding:"6px 12px",cursor:"pointer",color:active?(color||T.accent):T.text3,fontSize:12,fontWeight:active?700:500,fontFamily:"inherit",whiteSpace:"nowrap"}}>
-                {icon&&<span style={{fontSize:14}}>{icon}</span>}<span>{k==="all"?"All":SC[k].label}</span>
+                {k!=="all"&&k!=="none"&&<span style={{fontSize:14}}>{STAGE_ICONS[k]}</span>}<span>{label}</span>
               </button>;
             })}
           </div>
@@ -1576,7 +1690,7 @@ function App(){
         :<><div style={{fontSize:32,marginBottom:12}}>🔍</div><div style={{fontSize:15,fontWeight:600,color:T.text,marginBottom:6}}>No units match</div><div style={{fontSize:13,color:T.text3}}>Try a different filter</div></>
       }
     </div>}
-          {filteredUnits.map(u=><UnitCard key={u.id} unit={u} onEdit={u=>{setEditTgt(u.id);setForm({name:u.name,models:String(u.models),status:u.status,notes:u.notes||"",photos:safeP(u),subgroups:u.subgroups});setModal("editUnit");}} onDelete={delUnit} onStatus={chgStatus} onSplit={u=>setSplitTgt(u)} onDupe={dupUnit} onUpdateSubgroups={updSubgroups}/>)}
+          {filteredUnits.map(u=><UnitCard key={u.id} unit={u} onEdit={u=>{setEditTgt(u.id);setForm({name:u.name,models:String(u.models),status:u.status,stages:u.stages||[],notes:u.notes||"",photos:safeP(u),subgroups:u.subgroups});setModal("editUnit");}} onDelete={delUnit} onStages={chgStages} onSplit={u=>setSplitTgt(u)} onDupe={dupUnit} onUpdateSubgroups={updSubgroups}/>)}
         </>}
         {tab==="recipes"&&<>{(project.recipes||[]).length===0&&<div style={{textAlign:"center",color:T.text3,padding:"40px 0",fontSize:14}}>No recipes yet. Tap + Recipe to add one.</div>}{(project.recipes||[]).map(r=><RecipeCard key={r.id} recipe={r} onEdit={r=>setRecMod({recipe:r,mode:"edit"})} onDelete={delRecipe} onPaint={r=>setPaintMod(r)}/>)}</>}
         {tab==="showcase"&&(()=>{const shots=project.units.flatMap(u=>{const ph=safeP(u);return[{img:ph.after,lbl:"After",u},{img:ph.wip,lbl:"WIP",u},{img:ph.before,lbl:"Before",u}].filter(s=>s.img);});return <div><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>{shots.map(({img,lbl,u},i)=><div key={i} style={{borderRadius:14,overflow:"hidden",position:"relative",border:"1px solid "+T.border}}><img src={img} alt={u.name} style={{width:"100%",aspectRatio:"1",objectFit:"cover",display:"block"}}/><div style={{position:"absolute",bottom:0,left:0,right:0,background:"linear-gradient(transparent,rgba(0,0,0,0.75))",padding:"20px 10px 8px"}}><div style={{fontSize:12,fontWeight:800,color:"#fff"}}>{u.name}</div><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:3}}><Badge status={u.status}/><span style={{fontSize:10,color:"rgba(255,255,255,0.7)",background:"rgba(0,0,0,0.4)",borderRadius:4,padding:"2px 5px"}}>{lbl}</span></div></div></div>)}</div>{shots.length===0&&<div style={{textAlign:"center",color:T.text3,padding:"50px 0",fontSize:13}}>No photos yet.</div>}</div>;})()}
@@ -1614,7 +1728,7 @@ function App(){
         onBlur={e=>{if(!e.target.value||parseInt(e.target.value)<1)sf("models","1");}}
         style={{...IS,fontSize:16}}/>
     </Field>
-      <Sel label="Status" value={form.status||"new_in_box"} onChange={e=>sf("status",e.target.value)}>{Object.entries(SC).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}</Sel>
+      <div style={{marginBottom:13}}><label style={LS}>Progress</label><StageChecklist stages={form.stages||[]} onChange={v=>sf("stages",v)} models={parseInt(form.models)||1}/></div>
       <Txt label="Notes" placeholder="Assembly notes, colour cues..." value={form.notes||""} onChange={e=>sf("notes",e.target.value)}/>
       <MultiPhoto photos={form.photos||{before:null,wip:null,after:null}} onChange={v=>sf("photos",v)} sess={sess} projectId={pid} unitId={editTgt||"new"}/>
       <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:6}}><Btn v="sec" sm onClick={close}>Cancel</Btn><Btn sm onClick={modal==="addUnit"?addUnit:saveUnit}>{modal==="addUnit"?"Add Unit":"Save"}</Btn></div>
