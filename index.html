@@ -180,6 +180,48 @@ async function sbDeletePhoto(url){
   }catch(e){}
 }
 
+// ── Follow system (tr_follows table) ─────────────────────────────────────────
+async function sbFollow(followerEmail,followingEmail){
+  try{
+    const body=JSON.stringify({follower_email:followerEmail,following_email:followingEmail,status:"active"});
+    const r=await fetch(SB_URL+"/rest/v1/tr_follows",{method:"POST",headers:sbH({"Prefer":"resolution=merge-duplicates,return=minimal"}),body});
+    return r.ok||r.status===201||r.status===204;
+  }catch(e){return false;}
+}
+async function sbUnfollow(followerEmail,followingEmail){
+  try{
+    const r=await fetch(SB_URL+"/rest/v1/tr_follows?follower_email=eq."+encodeURIComponent(followerEmail)+"&following_email=eq."+encodeURIComponent(followingEmail),{method:"DELETE",headers:sbH()});
+    return r.ok||r.status===204;
+  }catch(e){return false;}
+}
+async function sbGetFollows(email){
+  // Returns {following:[...],followers:[...]}
+  try{
+    const [fing,fers]=await Promise.all([
+      fetch(SB_URL+"/rest/v1/tr_follows?follower_email=eq."+encodeURIComponent(email)+"&status=eq.active&select=following_email",{headers:sbH()}),
+      fetch(SB_URL+"/rest/v1/tr_follows?following_email=eq."+encodeURIComponent(email)+"&status=eq.active&select=follower_email",{headers:sbH()})
+    ]);
+    const following=fing.ok?(await fing.json()).map(r=>r.following_email):[];
+    const followers=fers.ok?(await fers.json()).map(r=>r.follower_email):[];
+    return{following,followers};
+  }catch(e){return{following:[],followers:[]};}
+}
+async function sbBlockFollower(myEmail,followerEmail){
+  try{
+    const body=JSON.stringify({status:"blocked"});
+    const r=await fetch(SB_URL+"/rest/v1/tr_follows?follower_email=eq."+encodeURIComponent(followerEmail)+"&following_email=eq."+encodeURIComponent(myEmail),{method:"PATCH",headers:sbH({"Prefer":"return=minimal"}),body});
+    return r.ok||r.status===204;
+  }catch(e){return false;}
+}
+async function sbLoadUserData(email){
+  try{
+    const r=await fetch(SB_URL+"/rest/v1/tr_user_data?user_id=eq."+encodeURIComponent(email)+"&select=projects",{headers:sbH()});
+    if(!r.ok)return null;
+    const j=await r.json();
+    return j&&j.length?j[0].projects||[]:null;
+  }catch(e){return null;}
+}
+
 function sbSubscribeProfiles(onUpdate){
   // Supabase realtime over WebSocket
   const ws=new WebSocket(SB_URL.replace("https","wss")+"/realtime/v1/websocket?apikey="+SB_KEY+"&vsn=1.0.0");
@@ -923,154 +965,269 @@ function SharedView({projects,by,onBack,onAdd}){
   </div>;
 }
 
-function Following({onClose}){
-  const [list,setList]=useState(()=>lsGet(SK.following,[]));
-  const [liveData,setLiveData]=useState({}); // email -> latest profile from Supabase
+function Following({onClose,sess}){
+  const [tab,setTab]=useState("following");
+  const [followingList,setFollowingList]=useState([]);
+  const [followerList,setFollowerList]=useState([]);
+  const [liveData,setLiveData]=useState({});
   const [addEmail,setAddEmail]=useState("");
   const [addErr,setAddErr]=useState("");
   const [viewing,setViewing]=useState(null);
-  const [refreshing,setRefreshing]=useState(false);
+  const [loading,setLoading]=useState(true);
+  const [busy,setBusy]=useState(false);
 
-  useEffect(()=>{lsSet(SK.following,list);},[list]);
+  const myEmail=sess&&sess.email;
 
-  // Load latest data for all followed users from Supabase
-  async function refreshAll(followList){
-    const emails=followList.filter(e=>e.type==="supabase").map(e=>e.email);
-    if(!emails.length)return;
-    setRefreshing(true);
-    const profiles=await sbGetProfiles(emails);
-    const map={};
-    profiles.forEach(p=>{map[p.user_id]=p;});
-    setLiveData(map);
-    setRefreshing(false);
+  // Load follow relationships from Supabase
+  async function loadFollows(){
+    if(!myEmail)return;
+    setLoading(true);
+    const {following,followers}=await sbGetFollows(myEmail);
+    setFollowingList(following);
+    setFollowerList(followers);
+    // Load profiles for all
+    const allEmails=[...new Set([...following,...followers])];
+    if(allEmails.length){
+      const profiles=await sbGetProfiles(allEmails);
+      const map={};profiles.forEach(p=>{map[p.user_id]=p;});
+      setLiveData(map);
+    }
+    setLoading(false);
   }
 
-  useEffect(()=>{refreshAll(list);},[]);
+  useEffect(()=>{loadFollows();},[myEmail]);
 
-  // Realtime subscription — update liveData when any followed profile changes
+  // Realtime subscription
   useEffect(()=>{
-    const emails=new Set(list.filter(e=>e.type==="supabase").map(e=>e.email));
-    if(!emails.size)return;
+    const allEmails=new Set([...followingList,...followerList]);
+    if(!allEmails.size)return;
     const unsub=sbSubscribeProfiles(payload=>{
       const row=payload.record||payload.new;
-      if(row&&emails.has(row.user_id)){
-        setLiveData(d=>({...d,[row.user_id]:row}));
-      }
+      if(row&&allEmails.has(row.user_id)){setLiveData(d=>({...d,[row.user_id]:row}));}
     });
     return unsub;
-  },[list]);
+  },[followingList,followerList]);
 
-  function initials(name){if(!name)return "?";return name.trim().split(" ").map(w=>w[0]).join("").toUpperCase().slice(0,2);}
+  function initials(name){if(!name)return"?";return name.trim().split(" ").map(w=>w[0]).join("").toUpperCase().slice(0,2);}
   function acolor(name){const cols=[T.accent,T.blue,T.green,T.orange,T.yellow];return name?cols[name.charCodeAt(0)%cols.length]:T.text3;}
 
   async function addFollow(){
-    const raw=addEmail.trim();
+    if(!myEmail){setAddErr("Sign in to follow people.");return;}
+    const raw=addEmail.trim().toLowerCase();
     if(!raw){setAddErr("Enter an email address.");return;}
-    // Validate it looks like an email
-    if(!raw.includes("@")){setAddErr("Enter the email address they use to sign in to Tabletop Ready.");return;}
-    setAddErr("");
-    setRefreshing(true);
+    if(!raw.includes("@")){setAddErr("Enter the email address they use to sign in.");return;}
+    if(raw===myEmail){setAddErr("You can't follow yourself.");return;}
+    if(followingList.includes(raw)){setAddErr("Already following that person.");return;}
+    setAddErr("");setBusy(true);
     const profile=await sbGetProfile(raw);
-    setRefreshing(false);
-    if(!profile){setAddErr("No Tabletop Ready account found for that email. Make sure they have signed in and saved some data.");return;}
-    if(list.some(e=>e.email===raw)){setAddErr("Already following that person.");return;}
-    setList(f=>[...f,{type:"supabase",email:raw,by:profile.display_name||raw.split("@")[0],ts:Date.now()}]);
-    setAddEmail("");
-    setLiveData(d=>({...d,[raw]:profile}));
+    if(!profile){setBusy(false);setAddErr("No Tabletop Ready account found for that email.");return;}
+    const ok=await sbFollow(myEmail,raw);
+    if(ok){
+      setFollowingList(f=>[...f,raw]);
+      setLiveData(d=>({...d,[raw]:profile}));
+      setAddEmail("");
+    } else {setAddErr("Could not follow — try again.");}
+    setBusy(false);
   }
 
-  function removeFollow(email){setList(f=>f.filter(x=>x.email!==email));}
-
-  function openFollow(entry){
-    const profile=liveData[entry.email];
-    if(!profile||!profile.profile||!profile.profile.projects){
-      setAddErr("No data yet for this person.");return;
-    }
-    setViewing({
-      type:"dashboard",
-      payload:{...profile.profile,by:profile.display_name||entry.by},
-    });
+  async function removeFollow(email){
+    if(!myEmail)return;
+    await sbUnfollow(myEmail,email);
+    setFollowingList(f=>f.filter(e=>e!==email));
   }
 
+  async function followBack(email){
+    if(!myEmail)return;
+    setBusy(true);
+    const ok=await sbFollow(myEmail,email);
+    if(ok)setFollowingList(f=>[...f,email]);
+    setBusy(false);
+  }
+
+  async function blockFollower(email){
+    if(!myEmail)return;
+    if(!window.confirm("Block "+email+"? They won't be able to see your profile."))return;
+    await sbBlockFollower(myEmail,email);
+    setFollowerList(f=>f.filter(e=>e!==email));
+  }
+
+  async function openProfile(email){
+    // Load full project data for this user
+    const profile=liveData[email];
+    const name=(profile&&profile.display_name)||email.split("@")[0];
+    setViewing({email,name,loading:true,projects:null,profile});
+    const projects=await sbLoadUserData(email);
+    setViewing(v=>v&&v.email===email?{...v,loading:false,projects}:v);
+  }
+
+  // ── Profile viewer ──────────────────────────────────────────────────────────
   if(viewing){
-    if(viewing.type==="dashboard")return <SharedDB payload={viewing.payload} onBack={()=>setViewing(null)}/>;
-    return <SharedView projects={viewing.projects} by={viewing.by} onBack={()=>setViewing(null)}/>;
+    const {email,name,loading:vloading,projects,profile}=viewing;
+    const col=acolor(name);
+    const pjs=projects||[];
+    const isFollowing=followingList.includes(email);
+    const isFollower=followerList.includes(email);
+
+    // Compute paint shopping list from their recipes
+    const paintNeeded=useMemo?useMemo(()=>{
+      const map={};
+      pjs.forEach(p=>(p.recipes||[]).forEach(r=>(r.steps||[]).forEach(s=>{
+        if(!s.paint)return;
+        const key=(s.brand||"")+s.paint;
+        if(!map[key])map[key]={name:s.paint,brand:s.brand||"",type:s.type||"",projects:new Set()};
+        map[key].projects.add(p.name);
+      })));
+      return Object.values(map).map(e=>({...e,projects:[...e.projects]})).sort((a,b)=>(a.brand+a.name).localeCompare(b.brand+b.name));
+    },[projects]):[];
+
+    const [vtab,setVtab]=useState("projects");
+    const [vpidx,setVpidx]=useState(null);
+
+    // Project detail view
+    if(vpidx!==null){
+      const p=pjs[vpidx];
+      const s=getStats(p);
+      const shots=p.units.flatMap(u=>{const ph=safeP(u);return[{img:ph.after,lbl:"After",u},{img:ph.wip,lbl:"WIP",u},{img:ph.before,lbl:"Before",u}].filter(x=>x.img);});
+      return <div style={{minHeight:"100dvh",background:T.bg0,fontFamily:"inherit",color:T.text}}>
+        <div style={{borderBottom:"1px solid "+T.border,padding:"calc(14px + env(safe-area-inset-top)) 15px 13px",display:"flex",alignItems:"center",gap:10,background:T.bg1,position:"sticky",top:0,zIndex:50}}>
+          <button onClick={()=>setVpidx(null)} style={{background:"none",border:"none",color:T.text2,cursor:"pointer",width:36,height:36,display:"flex",alignItems:"center",justifyContent:"center",borderRadius:10}}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg></button>
+          <div style={{flex:1,minWidth:0}}><div style={{fontSize:11,color:T.text3,fontWeight:700,textTransform:"uppercase",letterSpacing:"0.05em"}}>{name}</div><div style={{fontWeight:700,fontSize:16,color:T.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{p.name}{p.faction&&<span style={{fontWeight:400,color:T.text3,fontSize:13}}> · {p.faction}</span>}</div></div>
+        </div>
+        <div style={{padding:"12px 15px 40px",maxWidth:680,margin:"0 auto"}}>
+          <div style={{background:"#fff",borderRadius:14,padding:"14px",marginBottom:12,boxShadow:T.shadow}}><Bar stats={s}/><div style={{display:"flex",gap:10,flexWrap:"wrap",marginTop:6}}>{Object.entries(SC).map(([k,c])=><div key={k} style={{fontSize:12}}><span style={{color:T.text3}}>{c.label}: </span><span style={{color:c.color,fontWeight:700}}>{s[k]||0}</span></div>)}</div></div>
+          <TabBar tabs={[{id:"units",label:"Units ("+p.units.length+")"},{id:"recipes",label:"Recipes ("+(p.recipes||[]).length+")"},{id:"showcase",label:"Showcase"}]} active={vtab==="units"||vtab==="recipes"||vtab==="showcase"?vtab:"units"} onChange={t=>setVtab(t)}/>
+          {(vtab==="units"||vtab!=="recipes"&&vtab!=="showcase")&&p.units.map(u=>{const ph=safeP(u);const shots2=[{k:"before",l:"Before",v:ph.before},{k:"wip",l:"WIP",v:ph.wip},{k:"after",l:"After",v:ph.after}].filter(x=>x.v);return <div key={u.id} style={{background:"#fff",borderRadius:16,padding:"14px 16px",marginBottom:10,boxShadow:T.shadow}}>
+            {shots2.length>0&&<div style={{display:"flex",gap:6,marginBottom:10}}>{shots2.map(x=><div key={x.k} style={{position:"relative",flexShrink:0}}><img src={x.v} alt={x.l} style={{width:72,height:72,objectFit:"cover",borderRadius:10,display:"block"}}/><div style={{position:"absolute",bottom:2,left:2,background:"rgba(0,0,0,0.6)",borderRadius:4,padding:"2px 5px",fontSize:9,color:"#fff",fontWeight:700}}>{x.l}</div></div>)}</div>}
+            <div style={{fontWeight:700,fontSize:15,color:T.text,marginBottom:6}}>{u.name}</div>
+            <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}><Badge status={u.status}/><span style={{fontSize:13,color:T.text2}}>{u.models} model{u.models!==1?"s":""}</span></div>
+            {u.notes&&<div style={{marginTop:8,fontSize:12,color:T.text2,lineHeight:1.55,borderLeft:"2px solid "+T.border,paddingLeft:8,whiteSpace:"pre-wrap"}}>{u.notes}</div>}
+          </div>;})}
+          {vtab==="recipes"&&(p.recipes||[]).map(r=><RecipeCard key={r.id} recipe={r} readOnly onEdit={()=>{}} onDelete={()=>{}} onPaint={()=>{}}/>)}
+          {vtab==="showcase"&&<div><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>{shots.map(({img,lbl,u},i)=><div key={i} style={{borderRadius:14,overflow:"hidden",position:"relative"}}><img src={img} alt={u.name} style={{width:"100%",aspectRatio:"1",objectFit:"cover",display:"block"}}/><div style={{position:"absolute",bottom:0,left:0,right:0,background:"linear-gradient(transparent,rgba(0,0,0,0.75))",padding:"20px 10px 8px"}}><div style={{fontSize:12,fontWeight:800,color:"#fff"}}>{u.name}</div><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:3}}><Badge status={u.status}/><span style={{fontSize:10,color:"rgba(255,255,255,0.7)",background:"rgba(0,0,0,0.4)",borderRadius:4,padding:"2px 5px"}}>{lbl}</span></div></div></div>)}</div>{shots.length===0&&<div style={{textAlign:"center",color:T.text3,padding:"40px 0",fontSize:13}}>No photos yet.</div>}</div>}
+        </div>
+      </div>;
+    }
+
+    // Profile overview
+    const g={new_in_box:0,unbuilt:0,built:0,painted:0,total:0};
+    pjs.forEach(p=>{const s=getStats(p);Object.keys(g).forEach(k=>g[k]+=(s[k]||0));});
+    const pct=g.total?Math.round(g.painted/g.total*100):0;
+
+    return <div style={{minHeight:"100dvh",background:T.bg0,fontFamily:"inherit",color:T.text,display:"flex",flexDirection:"column"}}>
+      <div style={{borderBottom:"1px solid "+T.border,padding:"calc(14px + env(safe-area-inset-top)) 15px 13px",display:"flex",alignItems:"center",gap:10,background:T.bg1,position:"sticky",top:0,zIndex:50}}>
+        <button onClick={()=>setViewing(null)} style={{background:"none",border:"none",color:T.text2,cursor:"pointer",width:36,height:36,display:"flex",alignItems:"center",justifyContent:"center",borderRadius:10}}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg></button>
+        <div style={{flex:1}}><div style={{fontSize:11,fontWeight:800,color:T.text3,letterSpacing:"0.10em",textTransform:"uppercase"}}>TABLETOP READY</div><h1 style={{margin:0,fontSize:16,fontWeight:800,color:T.text}}>{name}</h1></div>
+        {!isFollowing&&<Btn sm onClick={()=>followBack(email)} sx={{opacity:busy?0.6:1}}>{busy?"...":"+ Follow"}</Btn>}
+      </div>
+      <div style={{flex:1,overflowY:"auto",padding:"12px 15px 40px",maxWidth:680,margin:"0 auto",width:"100%"}}>
+        {/* Profile header */}
+        <div style={{background:"#fff",borderRadius:18,padding:"18px",marginBottom:14,boxShadow:T.shadow,display:"flex",alignItems:"center",gap:14}}>
+          <div style={{width:56,height:56,borderRadius:"50%",background:col+"18",border:"2px solid "+col+"30",display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,fontWeight:800,color:col,flexShrink:0}}>{initials(name)}</div>
+          <div style={{flex:1}}>
+            <div style={{fontSize:17,fontWeight:800,color:T.text}}>{name}</div>
+            <div style={{fontSize:13,color:T.text3,marginTop:2}}>{pjs.length} project{pjs.length!==1?"s":""} · {g.total} models · {pct}% painted</div>
+            <div style={{display:"flex",gap:8,marginTop:8,flexWrap:"wrap"}}>
+              {isFollowing&&<span style={{fontSize:12,background:T.green+"14",color:T.green,borderRadius:20,padding:"3px 10px",fontWeight:700}}>✓ Following</span>}
+              {isFollower&&!isFollowing&&<Btn sm v="ok" onClick={()=>followBack(email)} sx={{opacity:busy?0.6:1}}>{busy?"...":"Follow back"}</Btn>}
+              {isFollower&&<span style={{fontSize:12,background:T.blue+"14",color:T.blue,borderRadius:20,padding:"3px 10px",fontWeight:700}}>Follows you</span>}
+            </div>
+          </div>
+        </div>
+        {vloading&&<div style={{textAlign:"center",padding:"40px 0",color:T.text3,fontSize:13}}>Loading projects...</div>}
+        {!vloading&&<>
+          <TabBar tabs={[{id:"projects",label:"Projects ("+pjs.length+")"},{id:"paints",label:"Paint List ("+paintNeeded.length+")"}]} active={vtab==="projects"||vtab==="paints"?vtab:"projects"} onChange={t=>setVtab(t)}/>
+          {(vtab==="projects"||vtab!=="paints")&&<>
+            {pjs.length===0&&<div style={{textAlign:"center",color:T.text3,padding:"40px 0",fontSize:13}}>No projects yet.</div>}
+            {pjs.map((p,i)=>{const s=getStats(p);const pct2=s.total?Math.round(s.painted/s.total*100):0;
+              // Find photos from units
+              const photos=p.units.flatMap(u=>{const ph=safeP(u);return[ph.after,ph.wip,ph.before].filter(Boolean);}).slice(0,3);
+              return <div key={i} onClick={()=>{setVtab("units");setVpidx(i);}} style={{background:"#fff",borderRadius:18,padding:"16px 18px",marginBottom:10,cursor:"pointer",boxShadow:T.shadow}}>
+                {photos.length>0&&<div style={{display:"flex",gap:6,marginBottom:10}}>{photos.map((img,j)=><img key={j} src={img} alt="" style={{width:56,height:56,objectFit:"cover",borderRadius:10,display:"block"}}/>)}</div>}
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}><div><div style={{fontWeight:700,fontSize:15,color:T.text}}>{p.name}</div>{p.faction&&<div style={{fontSize:13,color:T.text3,marginTop:2}}>{p.faction}</div>}</div><div style={{textAlign:"right"}}><div style={{fontWeight:700,color:T.green,fontSize:18}}>{pct2}%</div><div style={{fontSize:11,color:T.text3}}>{s.total} models</div></div></div>
+                <Bar stats={s}/>
+                <div style={{fontSize:12,color:T.text3,marginTop:4}}>{p.units.length} units · {(p.recipes||[]).length} recipes · tap to view</div>
+              </div>;})}
+          </>}
+          {vtab==="paints"&&<>
+            {paintNeeded.length===0&&<div style={{textAlign:"center",color:T.text3,padding:"40px 0",fontSize:13}}><div style={{fontSize:32,marginBottom:8}}>🎨</div>No paint recipes yet.</div>}
+            {paintNeeded.map((p,i)=><div key={i} style={{background:"#fff",borderRadius:12,padding:"12px 16px",marginBottom:8,boxShadow:T.shadow,display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+              <div><div style={{fontSize:14,fontWeight:700,color:T.text}}>{p.name}</div>{(p.brand||p.type)&&<div style={{fontSize:12,color:T.text3,marginTop:1}}>{[p.brand,p.type].filter(Boolean).join(" · ")}</div>}</div>
+              <div style={{fontSize:11,color:T.text3,textAlign:"right",flexShrink:0,maxWidth:120}}>{p.projects.slice(0,2).join(", ")}{p.projects.length>2?" +more":""}</div>
+            </div>)}
+          </>}
+        </>}
+      </div>
+    </div>;
   }
+
+  // ── Main Following screen ───────────────────────────────────────────────────
+  const activeTab=tab;
+  const displayList=activeTab==="following"?followingList:followerList;
+
   return <div style={{minHeight:"100dvh",background:T.bg0,fontFamily:"inherit",display:"flex",flexDirection:"column"}}>
     <div style={{borderBottom:"1px solid "+T.border,padding:"calc(14px + env(safe-area-inset-top)) 15px 13px",display:"flex",alignItems:"center",gap:10,background:"#fff",position:"sticky",top:0,zIndex:50}}>
       <button onClick={onClose} style={{background:"none",border:"none",color:T.text2,cursor:"pointer",fontSize:20,width:36,height:36,display:"flex",alignItems:"center",justifyContent:"center",borderRadius:10}}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg></button>
-      <div style={{flex:1}}><div style={{fontSize:11,fontWeight:800,color:T.text3,letterSpacing:"0.10em",textTransform:"uppercase"}}>TABLETOP READY</div><h1 style={{margin:0,fontSize:16,fontWeight:800,color:T.text}}>Following</h1></div>
-      <span style={{fontSize:13,color:T.text3,fontWeight:600}}>{list.length} following</span>
+      <div style={{flex:1}}><div style={{fontSize:11,fontWeight:800,color:T.text3,letterSpacing:"0.10em",textTransform:"uppercase"}}>TABLETOP READY</div><h1 style={{margin:0,fontSize:16,fontWeight:800,color:T.text}}>Community</h1></div>
+      <button onClick={loadFollows} style={{background:"none",border:"1px solid "+T.border,borderRadius:8,padding:"5px 12px",fontSize:12,color:T.text2,cursor:"pointer",fontFamily:"inherit"}}>{loading?"...":"Refresh"}</button>
     </div>
     <div style={{flex:1,overflowY:"auto",padding:"12px 15px 40px",maxWidth:680,margin:"0 auto",width:"100%"}}>
-      {/* Add new follow */}
-      <div style={{background:"#fff",borderRadius:18,padding:"18px",marginBottom:16,marginTop:6,boxShadow:T.shadow}}>
-        <div style={{fontSize:12,color:T.text3,fontWeight:600,textTransform:"uppercase",letterSpacing:"0.07em",marginBottom:12}}>Follow someone</div>
-        <div style={{display:"flex",gap:8,alignItems:"flex-start"}}>
-          <input value={addEmail} onChange={e=>{setAddEmail(e.target.value);setAddErr("");}} placeholder="Their Tabletop Ready email..." style={{...IS,flex:1,fontSize:14}} onKeyDown={e=>e.key==="Enter"&&addFollow()}/>
-          <Btn sm onClick={addFollow} sx={{flexShrink:0,height:42}}>{refreshing?"...":"Follow"}</Btn>
-        </div>
-        {addErr&&<div style={{fontSize:13,color:T.red,marginTop:8,lineHeight:1.5}}>{addErr}</div>}
-        <div style={{fontSize:12,color:T.text3,marginTop:10,lineHeight:1.6,padding:"10px 12px",background:T.bg2,borderRadius:10}}>
-          Enter the email address your friend uses to sign in. Their hobby progress will update live automatically.
-        </div>
+      {/* Tab bar */}
+      <div style={{display:"flex",gap:3,background:T.bg2,borderRadius:14,padding:4,marginBottom:16}}>
+        {[{id:"following",label:"Following ("+followingList.length+")"},{id:"followers",label:"Followers ("+followerList.length+")"}].map(t=><button key={t.id} onClick={()=>setTab(t.id)} style={{flex:1,padding:"9px 8px",borderRadius:10,border:"none",cursor:"pointer",fontWeight:tab===t.id?700:500,fontSize:13,fontFamily:"inherit",background:tab===t.id?"#fff":"transparent",color:tab===t.id?T.text:T.text3,boxShadow:tab===t.id?T.shadow:"none",transition:"all 0.15s"}}>{t.label}</button>)}
       </div>
 
-      {list.length>0&&<div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
-        <div style={{fontSize:13,color:T.text2,fontWeight:600}}>{list.length} following</div>
-        <button onClick={()=>refreshAll(list)} style={{background:"none",border:"1px solid "+T.border,borderRadius:8,padding:"5px 12px",fontSize:12,color:T.text2,cursor:"pointer",fontFamily:"inherit"}}>{refreshing?"Refreshing...":"Refresh all"}</button>
+      {/* Add follow input (following tab only) */}
+      {tab==="following"&&<div style={{background:"#fff",borderRadius:18,padding:"16px",marginBottom:14,boxShadow:T.shadow}}>
+        <div style={{fontSize:12,color:T.text3,fontWeight:600,textTransform:"uppercase",letterSpacing:"0.07em",marginBottom:10}}>Follow someone</div>
+        <div style={{display:"flex",gap:8}}>
+          <input value={addEmail} onChange={e=>{setAddEmail(e.target.value);setAddErr("");}} placeholder="Their email address..." style={{...IS,flex:1,fontSize:14}} onKeyDown={e=>e.key==="Enter"&&addFollow()}/>
+          <Btn sm onClick={addFollow} sx={{flexShrink:0,height:42,opacity:busy?0.6:1}}>{busy?"...":"Follow"}</Btn>
+        </div>
+        {addErr&&<div style={{fontSize:13,color:T.red,marginTop:8}}>{addErr}</div>}
       </div>}
 
-      {list.length===0
-        ?<div style={{textAlign:"center",padding:"60px 20px",color:T.text3}}>
-          <div style={{fontSize:40,marginBottom:16}}>👥</div>
-          <div style={{fontSize:17,fontWeight:700,color:T.text,marginBottom:8}}>Not following anyone yet</div>
-          <div style={{fontSize:14,lineHeight:1.6}}>Enter a friend's email address above to follow their hobby progress in real time.</div>
-        </div>
-        :list.map((entry,i)=>{
-          const live=liveData[entry.email];
-          const name=(live&&live.display_name)||entry.by||entry.email.split("@")[0];
-          const col=acolor(name);
-          const profile=live&&live.profile;
-          const pjs=profile&&profile.projects||[];
-          const painted=pjs.reduce((a,p)=>a+(p.stats&&p.stats.painted||0),0);
-          const total=pjs.reduce((a,p)=>a+(p.stats&&p.stats.total||0),0);
-          const pct=total?Math.round(painted/total*100):0;
-          const lastUpdate=live&&live.updated_at?new Date(live.updated_at).toLocaleString():null;
-          const fakeStats={painted,built:pjs.reduce((a,p)=>a+(p.stats&&p.stats.built||0),0),unbuilt:pjs.reduce((a,p)=>a+(p.stats&&p.stats.unbuilt||0),0),new_in_box:pjs.reduce((a,p)=>a+(p.stats&&p.stats.new_in_box||0),0),total};
-          return <div key={i} onClick={()=>openFollow(entry)} style={{background:"#fff",borderRadius:18,padding:"16px 18px",marginBottom:10,cursor:"pointer",boxShadow:T.shadow}}>
-            <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:total?8:0}}>
-              <div style={{width:46,height:46,borderRadius:"50%",background:col+"18",border:"2px solid "+col+"30",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,fontWeight:800,color:col,flexShrink:0}}>{initials(name)}</div>
-              <div style={{flex:1,minWidth:0}}>
-                <div style={{fontSize:16,fontWeight:700,color:T.text,lineHeight:1.2}}>{name}</div>
-                <div style={{fontSize:12,color:T.text3,marginTop:2}}>
-                  {pjs.length} project{pjs.length!==1?"s":""}
-                  {total>0&&<span> · {painted}/{total} painted ({pct}%)</span>}
-                </div>
-                {lastUpdate&&<div style={{fontSize:11,color:T.text3,marginTop:1}}>Updated {lastUpdate}</div>}
-              </div>
-              <div style={{display:"flex",gap:6,alignItems:"center",flexShrink:0}}>
-                <span style={{fontSize:12,color:T.accent,fontWeight:700}}>View →</span>
-                <button onClick={e=>{e.stopPropagation();removeFollow(entry.email);}} style={{background:"none",border:"1px solid "+T.border,borderRadius:8,padding:"4px 10px",fontSize:12,color:T.text3,cursor:"pointer",fontFamily:"inherit"}}>Remove</button>
-              </div>
+      {/* List */}
+      {loading&&<div style={{textAlign:"center",padding:"40px 0",color:T.text3,fontSize:13}}>Loading...</div>}
+      {!loading&&displayList.length===0&&<div style={{textAlign:"center",padding:"60px 20px",color:T.text3}}>
+        <div style={{fontSize:40,marginBottom:16}}>{tab==="following"?"👥":"🔔"}</div>
+        <div style={{fontSize:17,fontWeight:700,color:T.text,marginBottom:8}}>{tab==="following"?"Not following anyone yet":"No followers yet"}</div>
+        <div style={{fontSize:14,lineHeight:1.6}}>{tab==="following"?"Enter a friend's email above to follow their hobby progress.":"Share your email with friends to get followers."}</div>
+      </div>}
+      {!loading&&displayList.map((email,i)=>{
+        const profile=liveData[email];
+        const name=(profile&&profile.display_name)||email.split("@")[0];
+        const col=acolor(name);
+        const pjs=(profile&&profile.profile&&profile.profile.projects)||[];
+        const painted=pjs.reduce((a,p)=>a+(p.stats&&p.stats.painted||0),0);
+        const total=pjs.reduce((a,p)=>a+(p.stats&&p.stats.total||0),0);
+        const pct=total?Math.round(painted/total*100):0;
+        const fakeStats={painted,built:pjs.reduce((a,p)=>a+(p.stats&&p.stats.built||0),0),unbuilt:pjs.reduce((a,p)=>a+(p.stats&&p.stats.unbuilt||0),0),new_in_box:pjs.reduce((a,p)=>a+(p.stats&&p.stats.new_in_box||0),0),total};
+        const alsoFollowing=tab==="followers"&&followingList.includes(email);
+        return <div key={i} style={{background:"#fff",borderRadius:18,padding:"16px 18px",marginBottom:10,boxShadow:T.shadow}}>
+          <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:total?8:0}}>
+            <div onClick={()=>openProfile(email)} style={{width:46,height:46,borderRadius:"50%",background:col+"18",border:"2px solid "+col+"30",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,fontWeight:800,color:col,flexShrink:0,cursor:"pointer"}}>{initials(name)}</div>
+            <div style={{flex:1,minWidth:0,cursor:"pointer"}} onClick={()=>openProfile(email)}>
+              <div style={{fontSize:16,fontWeight:700,color:T.text,lineHeight:1.2}}>{name}</div>
+              <div style={{fontSize:12,color:T.text3,marginTop:2}}>{pjs.length} project{pjs.length!==1?"s":""}{total>0&&<span> · {painted}/{total} painted ({pct}%)</span>}</div>
+              {tab==="followers"&&alsoFollowing&&<span style={{fontSize:11,color:T.green,fontWeight:700}}>✓ Following back</span>}
+              {tab==="followers"&&!alsoFollowing&&<span style={{fontSize:11,color:T.text3}}>Not following back</span>}
             </div>
-            {total>0&&<Bar stats={fakeStats}/>}
-            {!live&&<div style={{fontSize:12,color:T.text3,fontStyle:"italic",marginTop:4}}>Loading latest data...</div>}
-          </div>;
-        })
-      }
+            <div style={{display:"flex",gap:6,flexShrink:0,flexDirection:"column",alignItems:"flex-end"}}>
+              <Btn sm v="blue" onClick={()=>openProfile(email)}>View →</Btn>
+              {tab==="following"&&<button onClick={()=>removeFollow(email)} style={{background:"none",border:"1px solid "+T.border,borderRadius:8,padding:"4px 10px",fontSize:11,color:T.text3,cursor:"pointer",fontFamily:"inherit"}}>Unfollow</button>}
+              {tab==="followers"&&!alsoFollowing&&<Btn sm v="ok" onClick={()=>followBack(email)} sx={{opacity:busy?0.6:1}}>{busy?"...":"Follow back"}</Btn>}
+              {tab==="followers"&&<button onClick={()=>blockFollower(email)} style={{background:"none",border:"1px solid "+T.red+"30",borderRadius:8,padding:"4px 10px",fontSize:11,color:T.red,cursor:"pointer",fontFamily:"inherit"}}>Block</button>}
+            </div>
+          </div>
+          {total>0&&<Bar stats={fakeStats}/>}
+        </div>;
+      })}
     </div>
-    {/* Bottom nav */}
     <div style={{position:"fixed",bottom:0,left:0,right:0,background:"#fff",borderTop:"1px solid "+T.border,display:"flex",zIndex:100,paddingBottom:"env(safe-area-inset-bottom)"}}>
-      {[{id:"dashboard",icon:"📊",label:"Dashboard"},{id:"projects",icon:"⚔️",label:"Projects"},{id:"following",icon:"👥",label:"Following"},{id:"paints",icon:"🎨",label:"Paints"}].map(({id,icon,label})=><button key={id} onClick={()=>onClose(id)} style={{flex:1,padding:"10px 4px 9px",background:"none",border:"none",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:3,opacity:id==="following"?1:0.45}}>
-        <span style={{fontSize:18}}>{icon}</span>
-        <span style={{fontSize:9,fontWeight:700,letterSpacing:"0.06em",textTransform:"uppercase",color:id==="following"?T.accent:T.text3,fontFamily:"inherit"}}>{label}</span>
-        {id==="following"&&<div style={{width:18,height:2,borderRadius:1,background:T.accent,marginTop:1}}/>}
-      </button>)}
+      {[{id:"dashboard",icon:"📊",label:"Dashboard"},{id:"projects",icon:"⚔️",label:"Projects"},{id:"following",icon:"👥",label:"Following"},{id:"paints",icon:"🎨",label:"Paints"}].map(({id,icon,label})=><button key={id} onClick={()=>onClose(id)} style={{flex:1,padding:"10px 4px 9px",background:"none",border:"none",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:3,opacity:id==="following"?1:0.45}}><span style={{fontSize:18}}>{icon}</span><span style={{fontSize:9,fontWeight:700,letterSpacing:"0.06em",textTransform:"uppercase",color:id==="following"?T.accent:T.text3,fontFamily:"inherit"}}>{label}</span>{id==="following"&&<div style={{width:18,height:2,borderRadius:1,background:T.accent,marginTop:1}}/>}</button>)}
     </div>
   </div>;
 }
-
 
 function App(){
   const {sess,signIn,signOut}=useAuth();
@@ -1178,7 +1335,7 @@ function App(){
   if(!sess&&!skipLogin)return <Login onSignIn={signIn} onSkip={()=>{lsSet(SK.skip,true);setSkipLogin(true);}}/>;
   if(screen==="paints")return <PaintLibrary paints={paints} addP={addP} delP={delP} togP={togP} onClose={id=>setScreen(id&&typeof id==="string"?id:"projects")}/>;
   if(screen==="shopping")return <ShoppingList data={data} paints={paints} onClose={()=>setScreen("projects")}/>;
-  if(screen==="following")return <Following onClose={id=>setScreen(id&&typeof id==="string"?id:"dashboard")}/>;
+  if(screen==="following")return <Following onClose={id=>setScreen(id&&typeof id==="string"?id:"dashboard")} sess={sess}/>;
   if(screen==="account")return <Account sess={sess} status={syncSt} err={syncErr} onOut={()=>{signOut();setSkipLogin(false);lsSet(SK.skip,false);setScreen("dashboard");}} onClose={()=>setScreen("dashboard")}/>;
 
   const menuItems=[];
