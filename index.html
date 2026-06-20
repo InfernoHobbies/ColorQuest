@@ -201,10 +201,20 @@ let _paintCatalogue=null;
 async function sbLoadCatalogue(){
   if(_paintCatalogue)return _paintCatalogue;
   try{
-    const r=await fetch(SB_URL+"/rest/v1/paints?select=*&order=brand,type,name",{headers:sbH()});
-    if(!r.ok)return[];
-    const j=await r.json();
-    _paintCatalogue=j||[];
+    let all=[];
+    let from=0;
+    const pageSize=1000;
+    while(true){
+      const r=await fetch(SB_URL+"/rest/v1/paints?select=*&order=brand,type,name",{
+        headers:sbH({"Range":from+"-"+(from+pageSize-1)})
+      });
+      if(!r.ok)break;
+      const j=await r.json();
+      all=all.concat(j||[]);
+      if(!j||j.length<pageSize)break;
+      from+=pageSize;
+    }
+    _paintCatalogue=all;
     return _paintCatalogue;
   }catch(e){return[];}
 }
@@ -546,8 +556,24 @@ function MultiPhoto({photos,onChange,sess,projectId,unitId}){
 function PaintPicker({step,onChange,paints,addP}){
   const brands=useMemo(()=>[...new Set(paints.map(p=>p.brand))].sort(),[paints]);
   const types=useMemo(()=>{const src=step.brand?paints.filter(p=>p.brand===step.brand):paints;return[...new Set(src.map(p=>p.type))].sort();},[paints,step.brand]);
-  const list=useMemo(()=>paints.filter(p=>(!step.brand||p.brand===step.brand)&&(!step.type||p.type===step.type)).sort((a,b)=>a.name.localeCompare(b.name)),[paints,step.brand,step.type]);
-  const own=useMemo(()=>step.paint&&paints.find(p=>p.name===step.paint&&(!step.brand||p.brand===step.brand)),[paints,step]);
+  const list=useMemo(()=>{
+    const filtered=paints.filter(p=>(!step.brand||p.brand===step.brand)&&(!step.type||p.type===step.type));
+    const seen=new Set();
+    const deduped=[];
+    filtered.sort((a,b)=>a.name.localeCompare(b.name)).forEach(p=>{
+      if(seen.has(p.name))return;
+      seen.add(p.name);
+      deduped.push(p);
+    });
+    return deduped;
+  },[paints,step.brand,step.type]);
+  const own=useMemo(()=>{
+    if(!step.paint)return null;
+    const matches=paints.filter(p=>p.name===step.paint&&(!step.brand||p.brand===step.brand));
+    if(!matches.length)return null;
+    const owned=matches.some(p=>p.owned);
+    return{owned};
+  },[paints,step]);
   const [sav,setSav]=useState(false);
   const [nn,setNn]=useState("");
   function doSave(){if(!nn.trim())return;addP({brand:step.brand||"",type:step.type||"",name:nn.trim(),owned:true});onChange({...step,paint:nn.trim()});setSav(false);setNn("");}
@@ -966,7 +992,7 @@ function PaintLibrary({paints,catalogue,catLoaded,addP,delP,togP,onClose}){
 }
 
 function ShoppingList({data,paints,onClose}){
-  const needed=useMemo(()=>{const map={};data.projects.forEach(proj=>{(proj.recipes||[]).forEach(recipe=>{(recipe.steps||[]).forEach(step=>{if(!step.paint)return;const inLib=paints.find(p=>p.name===step.paint&&(!step.brand||p.brand===step.brand));if(inLib&&inLib.owned)return;const key=(step.brand||"")+(step.type||"")+step.paint;if(!map[key])map[key]={name:step.paint,brand:step.brand||"",type:step.type||"",projects:new Set()};map[key].projects.add(proj.name);});});});return Object.values(map).map(e=>({...e,projects:[...e.projects]})).sort((a,b)=>(a.brand+a.name).localeCompare(b.brand+b.name));},[data,paints]);
+  const needed=useMemo(()=>{const map={};data.projects.forEach(proj=>{(proj.recipes||[]).forEach(recipe=>{(recipe.steps||[]).forEach(step=>{if(!step.paint)return;const matches=paints.filter(p=>p.name===step.paint&&(!step.brand||p.brand===step.brand));const ownedAny=matches.some(p=>p.owned);if(ownedAny)return;const key=(step.brand||"")+(step.type||"")+step.paint;if(!map[key])map[key]={name:step.paint,brand:step.brand||"",type:step.type||"",projects:new Set()};map[key].projects.add(proj.name);});});});return Object.values(map).map(e=>({...e,projects:[...e.projects]})).sort((a,b)=>(a.brand+a.name).localeCompare(b.brand+b.name));},[data,paints]);
   const grouped=useMemo(()=>{const g={};needed.forEach(p=>{const k=p.brand||"Unknown Brand";if(!g[k])g[k]=[];g[k].push(p);});return g;},[needed]);
   return <div style={{minHeight:"100dvh",background:T.bg0,fontFamily:"inherit",display:"flex",flexDirection:"column"}}>
     <div style={{borderBottom:"1px solid "+T.border,padding:"calc(14px + env(safe-area-inset-top)) 15px 13px",display:"flex",alignItems:"center",gap:10,background:T.bg1,position:"sticky",top:0,zIndex:50}}>
@@ -1672,7 +1698,7 @@ function App(){
   const saveProject=()=>{mut(ps=>ps.map(p=>p.id===editTgt?{...p,name:form.name?form.name.trim():p.name,faction:form.faction!==undefined?form.faction.trim():p.faction}:p));close();};
   const delProject=id=>{mut(ps=>ps.filter(p=>p.id!==id));setScreen("projects");};
 
-  const addUnit=()=>{if(!form.name||!form.name.trim())return;const u={id:nid(),name:form.name.trim(),models:parseInt(form.models)||1,stages:[],status:"new_in_box",notes:form.notes||"",photos:form.photos||{before:null,wip:null,after:null},subgroups:null};mut(ps=>ps.map(p=>p.id===pid?{...p,units:[...p.units,u]}:p));close();};
+  const addUnit=()=>{if(!form.name||!form.name.trim())return;const stages=form.stages||[];const u={id:nid(),name:form.name.trim(),models:parseInt(form.models)||1,stages,status:stagesToStatus(stages),notes:form.notes||"",photos:form.photos||{before:null,wip:null,after:null},subgroups:null};mut(ps=>ps.map(p=>p.id===pid?{...p,units:[...p.units,u]}:p));close();};
   const saveUnit=()=>{mut(ps=>ps.map(p=>p.id===pid?{...p,units:p.units.map(u=>u.id===editTgt?{...u,name:form.name?form.name.trim():u.name,models:parseInt(form.models)||u.models,stages:form.stages!==undefined?form.stages:u.stages||[],status:form.stages!==undefined?stagesToStatus(form.stages):(u.status||"new_in_box"),notes:form.notes!==undefined?form.notes:u.notes,photos:form.photos!==undefined?form.photos:safeP(u),subgroups:form.subgroups!==undefined?form.subgroups:u.subgroups}:u)}:p));close();};
   const delUnit=id=>mut(ps=>ps.map(p=>p.id===pid?{...p,units:p.units.filter(u=>u.id!==id)}:p));
   const chgStages=(uid,newStages)=>{
